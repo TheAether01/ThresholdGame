@@ -245,6 +245,27 @@ Valid states: PATROL, ATTACK, FLANK, SUPPRESS, RETREAT, ALLIED
             _playerCoverUsage = coverUsage;
         }
 
+        /// <summary>
+        /// Force an immediate evaluation. Useful for testing and debugging.
+        /// Resets the evaluation timer so the next scheduled eval happens
+        /// a full interval later.
+        /// </summary>
+        public void ForceEvaluation()
+        {
+            if (IsEvaluating)
+            {
+                Debug.Log("[NPCBrain] Evaluation already in progress, cannot force.");
+                return;
+            }
+            if (!_roomActive)
+            {
+                Debug.Log("[NPCBrain] No active room, cannot force evaluation.");
+                return;
+            }
+            _evalTimer = evaluationInterval;
+            _ = RunEvaluation();
+        }
+
         // ====================================================================
         // Update Loop
         // ====================================================================
@@ -268,8 +289,15 @@ Valid states: PATROL, ATTACK, FLANK, SUPPRESS, RETREAT, ALLIED
 
         private async Task RunEvaluation()
         {
+            // C5 FIX: Set flag synchronously BEFORE any await to prevent race
             if (IsEvaluating) return;
-            if (ActiveNPCs.Count == 0) return;
+            IsEvaluating = true;
+
+            if (ActiveNPCs.Count == 0)
+            {
+                IsEvaluating = false;
+                return;
+            }
 
             // Remove dead NPCs before evaluation
             ActiveNPCs.RemoveAll(n => n == null || n.IsDead);
@@ -281,11 +309,9 @@ Valid states: PATROL, ATTACK, FLANK, SUPPRESS, RETREAT, ALLIED
                 return;
             }
 
-            IsEvaluating = true;
-            EvaluationCount++;
-
             try
             {
+                EvaluationCount++;
                 string gameState = BuildGameStateJson(hostileNpcs);
 
                 var request = new AgentRequest(
@@ -310,6 +336,9 @@ Valid states: PATROL, ATTACK, FLANK, SUPPRESS, RETREAT, ALLIED
 
                     if (logEvaluations)
                         LogResult(result);
+
+                    // M5 FIX: Auto-refresh allied NPC targets after each eval
+                    SetAlliedTargets();
                 }
                 else
                 {

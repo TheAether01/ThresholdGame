@@ -1,0 +1,21 @@
+{
+  "difficulty": { "difficultyMultiplier": 1.0, "targetRoomCount": 5, "baseEnemiesPerRoom": 4, "eliteCount": 1, "eventProbability": 0.0, "preferredTactic": "ATTACK" },
+  "rooms": [
+    { "roomId": "room_0", "gridCol": 1, "gridRow": 0, "shape": 4, "role": 0, "rotationDegrees": 0, "doorways": [{ "direction": 0, "isOpen": true, "connectedRoomId": "room_1" }], "spawnZones": [], "items": [], "events": [] },
+    { "roomId": "room_1", "gridCol": 1, "gridRow": 1, "shape": 0, "role": 3, "rotationDegrees": 0, "doorways": [{ "direction": 0, "isOpen": true, "connectedRoomId": "room_3" }, { "direction": 1, "isOpen": true, "connectedRoomId": "room_4" }, { "direction": 2, "isOpen": true, "connectedRoomId": "room_0" }, { "direction": 3, "isOpen": true, "connectedRoomId": "room_2" }], "spawnZones": [{ "localPosition": { "x": 3, "y": 0, "z": 3 }, "archetype": 0, "count": 2, "spawnDelay": 0 }, { "localPosition": { "x": -3, "y": 0, "z": -3 }, "archetype": 0, "count": 2, "spawnDelay": 0 }], "items": [], "events": [] },
+    { "roomId": "room_2", "gridCol": 0, "gridRow": 1, "shape": 4, "role": 6, "rotationDegrees": 90, "doorways": [{ "direction": 1, "isOpen": true, "connectedRoomId": "room_1" }], "spawnZones": [], "items": [{ "itemType": 1, "localPosition": { "x": 0, "y": 0, "z": 0 } }, { "itemType": 0, "localPosition": { "x": 2, "y": 0, "z": 2 } }], "events": [] },
+    { "roomId": "room_3", "gridCol": 1, "gridRow": 2, "shape": 2, "role": 4, "rotationDegrees": 0, "doorways": [{ "direction": 0, "isOpen": true, "connectedRoomId": "room_5" }, { "direction": 2, "isOpen": true, "connectedRoomId": "room_1" }], "spawnZones": [{ "localPosition": { "x": 0, "y": 0, "z": 3 }, "archetype": 0, "count": 3, "spawnDelay": 0 }, { "localPosition": { "x": 2, "y": 0, "z": -2 }, "archetype": 0, "count": 2, "spawnDelay": 1.5 }], "items": [], "events": [] },
+    { "roomId": "room_4", "gridCol": 2, "gridRow": 1, "shape": 4, "role": 7, "rotationDegrees": 270, "doorways": [{ "direction": 3, "isOpen": true, "connectedRoomId": "room_1" }], "spawnZones": [{ "localPosition": { "x": 0, "y": 0, "z": 0 }, "archetype": 0, "count": 4, "spawnDelay": 0 }], "items": [], "events": [] },
+    { "roomId": "room_5", "gridCol": 1, "gridRow": 3, "shape": 2, "role": 5, "rotationDegrees": 0, "doorways": [{ "direction": 0, "isOpen": true, "connectedRoomId": "room_end" }, { "direction": 2, "isOpen": true, "connectedRoomId": "room_3" }], "spawnZones": [{ "localPosition": { "x": 0, "y": 0, "z": 0 }, "archetype": 3, "count": 1, "spawnDelay": 0 }, { "localPosition": { "x": -3, "y": 0, "z": 3 }, "archetype": 0, "count": 3, "spawnDelay": 0.5 }], "items": [{ "itemType": 0, "localPosition": { "x": 3, "y": 0, "z": -3 } }], "events": [] },
+    { "roomId": "room_end", "gridCol": 1, "gridRow": 4, "shape": 4, "role": 1, "rotationDegrees": 180, "doorways": [{ "direction": 2, "isOpen": true, "connectedRoomId": "room_5" }], "spawnZones": [], "items": [], "events": [] }
+  ],
+  "edges": [
+    { "roomIdA": "room_0", "roomIdB": "room_1", "directionFromA": 0 },
+    { "roomIdA": "room_1", "roomIdB": "room_2", "directionFromA": 3 },
+    { "roomIdA": "room_1", "roomIdB": "room_3", "directionFromA": 0 },
+    { "roomIdA": "room_1", "roomIdB": "room_4", "directionFromA": 1 },
+    { "roomIdA": "room_3", "roomIdB": "room_5", "directionFromA": 0 },
+    { "roomIdA": "room_5", "roomIdB": "room_end", "directionFromA": 0 }
+  ],
+  "metadata": { "seed": 0, "generationMethod": "baseline_template", "noveltyScore": 0.0, "timestamp": "", "qcAttempts": 0, "gridWidth": 3, "gridHeight": 5 }
+}

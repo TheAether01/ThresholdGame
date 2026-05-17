@@ -125,6 +125,13 @@ the player directly (""I noticed you..."").
                 model: GeminiModel.Flash // Director uses Flash for speed
             );
 
+            // C6 FIX: Guard against null Instance (no API key or component not in scene)
+            if (GeminiAgentBridge.Instance == null)
+            {
+                Debug.LogWarning("[DirectorAgent] GeminiAgentBridge.Instance is null. Using fallback.");
+                return BuildFallback();
+            }
+
             // Call Gemini
             var response = await GeminiAgentBridge.Instance.SendAgentRequest(request);
 

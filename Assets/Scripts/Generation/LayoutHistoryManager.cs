@@ -55,8 +55,9 @@ namespace Threshold.Generation
                 roomCount = config.rooms.Count,
                 shapeSequence = config.rooms.Select(r => r.shape.ToString()).ToList(),
                 roleSequence = config.rooms.Select(r => r.role.ToString()).ToList(),
+                // M5 FIX: Use serializable struct instead of int[] (JsonUtility can't handle jagged arrays)
                 gridPositions = config.rooms
-                    .Select(r => new int[] { r.gridCol, r.gridRow })
+                    .Select(r => new GridPos { x = r.gridCol, y = r.gridRow })
                     .ToList()
             };
 
@@ -98,7 +99,13 @@ namespace Threshold.Generation
                 totalNovelty += (1f - combined);
             }
 
-            return Mathf.Clamp01(totalNovelty / _history.Count);
+            float raw = Mathf.Clamp01(totalNovelty / _history.Count);
+
+            // L1 FIX: Snap to exact 0/1 to eliminate floating-point imprecision
+            // on identical or completely novel layouts
+            if (raw < 0.005f) return 0f;
+            if (raw > 0.995f) return 1f;
+            return raw;
         }
 
         /// <summary>Number of layouts in history.</summary>
@@ -148,14 +155,14 @@ namespace Threshold.Generation
                 Array.Clear(curr, 0, curr.Length);
             }
 
-            return prev.Max();
+            return prev[n]; // M4 FIX: was prev.Max() which over-counted similarity
         }
 
         /// <summary>
         /// Compares grid footprints using Jaccard similarity on occupied cells.
         /// Returns 0–1 where 1 = identical footprint.
         /// </summary>
-        private float GridSimilarity(HashSet<Vector2Int> candidateGrid, List<int[]> pastPositions)
+        private float GridSimilarity(HashSet<Vector2Int> candidateGrid, List<GridPos> pastPositions)
         {
             if (candidateGrid.Count == 0 || pastPositions == null || pastPositions.Count == 0)
                 return 0f;
@@ -163,8 +170,7 @@ namespace Threshold.Generation
             var pastGrid = new HashSet<Vector2Int>();
             foreach (var pos in pastPositions)
             {
-                if (pos.Length >= 2)
-                    pastGrid.Add(new Vector2Int(pos[0], pos[1]));
+                pastGrid.Add(new Vector2Int(pos.x, pos.y));
             }
 
             int intersection = 0;
@@ -204,6 +210,11 @@ namespace Threshold.Generation
                     string json = File.ReadAllText(_savePath);
                     var wrapper = JsonUtility.FromJson<HistoryWrapper>(json);
                     _history = wrapper?.layouts ?? new List<LayoutSnapshot>();
+
+                    // L4 FIX: Trim to maxHistory in case save file was manually edited
+                    while (_history.Count > maxHistory)
+                        _history.RemoveAt(0);
+
                     Debug.Log($"[LayoutHistory] Loaded {_history.Count} past layouts.");
                 }
             }
@@ -232,7 +243,16 @@ namespace Threshold.Generation
             public int roomCount;
             public List<string> shapeSequence;
             public List<string> roleSequence;
-            public List<int[]> gridPositions;
+            // M5 FIX: Use serializable struct instead of int[] for JsonUtility
+            public List<GridPos> gridPositions;
+        }
+
+        /// <summary>Serializable grid position for JsonUtility compatibility.</summary>
+        [Serializable]
+        private struct GridPos
+        {
+            public int x;
+            public int y;
         }
     }
 }

@@ -93,8 +93,10 @@ namespace Threshold.Generation
         {
             if (IsRunning)
             {
+                // M10 FIX: Return null so callers know generation is in progress
+                // (previously returned LastResult which could be stale)
                 Debug.LogWarning("[Pipeline] Already running. Ignoring duplicate call.");
-                return LastResult;
+                return null;
             }
 
             IsRunning = true;
@@ -190,14 +192,26 @@ namespace Threshold.Generation
                     acceptedConfig = ProceduralRoomGenerator.GenerateFallback(result.difficulty);
                     fallbackTimer.Stop();
 
+                    // C8 FIX: Validate the fallback config too
+                    var fallbackIssues = ProceduralRoomGenerator.Validate(acceptedConfig);
+                    bool fallbackValid = fallbackIssues.Count == 0 ||
+                                         fallbackIssues.TrueForAll(i => i.StartsWith("Warning"));
+
                     steps.Add(new PipelineStep
                     {
                         stepName = "Fallback Generator",
                         source = "local",
-                        success = true,
+                        success = fallbackValid,
                         durationMs = fallbackTimer.ElapsedMilliseconds,
-                        details = $"Generated {acceptedConfig.rooms.Count} rooms locally after {attempt} Gemini failures."
+                        details = fallbackValid
+                            ? $"Generated {acceptedConfig.rooms.Count} rooms locally after {attempt} Gemini failures."
+                            : $"Fallback generated but has issues: {string.Join("; ", fallbackIssues)}"
                     });
+
+                    if (!fallbackValid)
+                    {
+                        Debug.LogWarning($"[Pipeline] Fallback has non-warning issues: {string.Join("; ", fallbackIssues)}");
+                    }
 
                     result.generationSource = "fallback";
                     Debug.Log("[Pipeline] Fallback generator produced a valid layout.");
@@ -626,7 +640,8 @@ If ANY check fails, REJECT and list all failures.";
             {
                 int nl = clean.IndexOf('\n');
                 int lf = clean.LastIndexOf("```");
-                if (nl > 0 && lf > nl)
+                // M8 FIX: Ensure lastFence is actually the closing fence, not the opening one
+                if (nl > 0 && lf > nl && lf != 0)
                     clean = clean.Substring(nl + 1, lf - nl - 1).Trim();
             }
             return clean;

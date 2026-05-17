@@ -4,6 +4,7 @@
 // ============================================================================
 
 using System.Collections.Generic;
+using System.Linq;
 using Threshold.Core;
 using UnityEngine;
 
@@ -69,6 +70,7 @@ namespace Threshold.Generation
             CurrentConfig = config;
 
             float mw = GetModuleWidth();
+            bool hasSkippedCriticalRoom = false;
 
             foreach (var roomConfig in config.rooms)
             {
@@ -77,6 +79,8 @@ namespace Threshold.Generation
                 if (prefab == null)
                 {
                     Debug.LogError($"[FloorGenerator] No prefab found for shape {roomConfig.shape}.");
+                    if (roomConfig.role == RoomRole.ENTRY || roomConfig.role == RoomRole.EXIT)
+                        hasSkippedCriticalRoom = true;
                     continue;
                 }
 
@@ -86,22 +90,33 @@ namespace Threshold.Generation
                 bool needS = roomConfig.HasDoorway(Direction.SOUTH);
                 bool needW = roomConfig.HasDoorway(Direction.WEST);
 
-                int rotSteps = prefab.FindMatchingRotation(needN, needE, needS, needW);
+                // Prefer exact match (no extra doorways facing void)
+                int rotSteps = prefab.FindExactMatchingRotation(needN, needE, needS, needW);
                 if (rotSteps < 0)
                 {
-                    // Fallback: use exact match or default rotation
+                    // Superset fallback — extra doorways will be sealed below
+                    rotSteps = prefab.FindMatchingRotation(needN, needE, needS, needW);
+                }
+                if (rotSteps < 0)
+                {
                     rotSteps = 0;
-                    Debug.LogWarning($"[FloorGenerator] No rotation match for {roomConfig.roomId} " +
-                                     $"({roomConfig.shape}). Using default orientation.");
+                    Debug.LogError($"[FloorGenerator] No rotation match for {roomConfig.roomId} " +
+                                   $"({roomConfig.shape}) needing doors=[" +
+                                   $"{(needN ? "N" : "")}{(needE ? "E" : "")}" +
+                                   $"{(needS ? "S" : "")}{(needW ? "W" : "")}]. " +
+                                   $"Prefab defaults=[{(prefab.doorNorth ? "N" : "")}" +
+                                   $"{(prefab.doorEast ? "E" : "")}{(prefab.doorSouth ? "S" : "")}" +
+                                   $"{(prefab.doorWest ? "W" : "")}]. Using 0° fallback.");
                 }
 
                 roomConfig.rotationDegrees = rotSteps * 90;
 
-                // Calculate world position: col * width, 0, row * -width
+                // Calculate world position: col * width, 0, row * width
+                // Higher gridRow = NORTH = +Z (must match edge direction convention)
                 Vector3 worldPos = new(
                     roomConfig.gridCol * mw,
                     0f,
-                    roomConfig.gridRow * -mw
+                    roomConfig.gridRow * mw
                 );
 
                 // Instantiate
@@ -112,6 +127,9 @@ namespace Threshold.Generation
                 RoomModule module = roomObj.GetComponent<RoomModule>();
                 _instantiatedRooms.Add(roomObj);
                 _roomModuleMap[roomConfig.roomId] = module;
+
+                // Seal extra doorways that face void (superset match case)
+                SealUnusedDoorways(module, rotSteps, needN, needE, needS, needW, mw);
 
                 // Track entry/exit positions
                 if (roomConfig.role == RoomRole.ENTRY)
@@ -138,6 +156,18 @@ namespace Threshold.Generation
 
             Debug.Log($"[FloorGenerator] Floor built: {_instantiatedRooms.Count} rooms, " +
                      $"Entry={EntryWorldPosition}, Exit={ExitWorldPosition}");
+
+            // M12 FIX: Fail if critical rooms were skipped
+            if (hasSkippedCriticalRoom)
+            {
+                Debug.LogError("[FloorGenerator] ENTRY or EXIT room could not be instantiated!");
+                return false;
+            }
+
+            // L3 FIX: Remind about NavMesh — NPCs using NavMeshAgent will fail without it
+            Debug.Log("[FloorGenerator] ⚠ NavMesh: If using NavMeshAgent NPCs, rebake NavMesh now. " +
+                      "Use NavMeshSurface.BuildNavMesh() at runtime or bake in Editor.");
+
             return true;
         }
 
@@ -154,8 +184,13 @@ namespace Threshold.Generation
             {
                 if (obj != null) Destroy(obj);
             }
+            foreach (var obj in _instantiatedNPCs)
+            {
+                if (obj != null) Destroy(obj);
+            }
             _instantiatedRooms.Clear();
             _instantiatedItems.Clear();
+            _instantiatedNPCs.Clear();
             _roomModuleMap.Clear();
             CurrentConfig = null;
         }
@@ -169,6 +204,13 @@ namespace Threshold.Generation
             return module;
         }
 
+        [Header("NPC Prefabs")]
+        [Tooltip("Default NPC prefab. Must have NPCStateMachine + NavMeshAgent.")]
+        [SerializeField] private GameObject npcPrefab;
+
+        // NPC tracking
+        private readonly List<GameObject> _instantiatedNPCs = new();
+
         /// <summary>
         /// Returns spawn point transforms for a given room.
         /// </summary>
@@ -178,46 +220,193 @@ namespace Threshold.Generation
             return module != null ? module.spawnPoints : null;
         }
 
+        /// <summary>
+        /// C7 FIX: Spawns NPC GameObjects at the spawn zones defined in a room config.
+        /// Returns all spawned NPCStateMachine components for registration with the Brain Controller.
+        /// Requires a player Transform for NPC initialization.
+        /// </summary>
+        public List<Threshold.NPC.NPCStateMachine> SpawnNPCsForRoom(
+            RoomConfig roomConfig, Transform player, float spawnYOffset = 0.5f)
+        {
+            var spawned = new List<Threshold.NPC.NPCStateMachine>();
+
+            if (roomConfig.spawnZones == null || roomConfig.spawnZones.Count == 0)
+                return spawned;
+
+            if (npcPrefab == null)
+            {
+                Debug.LogWarning("[FloorGenerator] Cannot spawn NPCs — npcPrefab is not assigned.");
+                return spawned;
+            }
+
+            var module = GetRoomModule(roomConfig.roomId);
+            if (module == null)
+            {
+                Debug.LogWarning($"[FloorGenerator] Cannot spawn NPCs — room {roomConfig.roomId} not instantiated.");
+                return spawned;
+            }
+
+            int npcIndex = 0;
+            foreach (var zone in roomConfig.spawnZones)
+            {
+                for (int i = 0; i < zone.count; i++)
+                {
+                    // Calculate world position from local offset + room position
+                    Vector3 localOffset = zone.localPosition;
+                    // Add slight random jitter so NPCs don't stack
+                    localOffset.x += UnityEngine.Random.Range(-0.5f, 0.5f);
+                    localOffset.z += UnityEngine.Random.Range(-0.5f, 0.5f);
+                    localOffset.y = spawnYOffset;
+
+                    Vector3 worldPos = module.transform.TransformPoint(localOffset);
+
+                    GameObject npcObj = Instantiate(npcPrefab, worldPos, Quaternion.identity, module.transform);
+                    string npcId = $"npc_{roomConfig.roomId}_{npcIndex}";
+                    npcObj.name = npcId;
+
+                    var sm = npcObj.GetComponent<Threshold.NPC.NPCStateMachine>();
+                    if (sm == null)
+                        sm = npcObj.AddComponent<Threshold.NPC.NPCStateMachine>();
+
+                    sm.Initialize(npcId, zone.archetype, player);
+                    spawned.Add(sm);
+                    _instantiatedNPCs.Add(npcObj);
+                    npcIndex++;
+
+                    if (logInstantiation)
+                        Debug.Log($"[FloorGenerator] Spawned {npcId} ({zone.archetype}) at {worldPos}");
+                }
+            }
+
+            return spawned;
+        }
+
+        /// <summary>
+        /// Spawns NPCs for ALL rooms in the current config.
+        /// Returns a dictionary of roomId → list of NPCStateMachines.
+        /// </summary>
+        public Dictionary<string, List<Threshold.NPC.NPCStateMachine>> SpawnAllNPCs(Transform player)
+        {
+            var result = new Dictionary<string, List<Threshold.NPC.NPCStateMachine>>();
+
+            if (CurrentConfig?.rooms == null) return result;
+
+            foreach (var roomConfig in CurrentConfig.rooms)
+            {
+                var npcs = SpawnNPCsForRoom(roomConfig, player);
+                if (npcs.Count > 0)
+                    result[roomConfig.roomId] = npcs;
+            }
+
+            Debug.Log($"[FloorGenerator] Spawned NPCs in {result.Count} rooms, " +
+                      $"{result.Values.Sum(l => l.Count)} total NPCs.");
+            return result;
+        }
+
         // ====================================================================
         // Internal
         // ====================================================================
+
+        /// <summary>
+        /// Seals doorways in the instantiated prefab that are NOT needed by
+        /// the graph (extra openings from superset rotation match).
+        /// Spawns wall cubes to block them so players can't see void.
+        /// </summary>
+        private void SealUnusedDoorways(RoomModule module, int rotSteps,
+            bool needN, bool needE, bool needS, bool needW, float mw)
+        {
+            // C7 FIX: Use rotation step 0 because the prefab's booleans describe
+            // the un-rotated state. The GameObject is already physically rotated,
+            // so its local +Z/+X/etc. already point to the correct world directions.
+            // We need the DEFAULT doorway pattern, not the rotated one.
+            bool[] defaults = { module.doorNorth, module.doorEast, module.doorSouth, module.doorWest };
+            // Rotate the defaults to match the applied rotation
+            bool hasN = defaults[((0 - rotSteps) % 4 + 4) % 4];
+            bool hasE = defaults[((1 - rotSteps) % 4 + 4) % 4];
+            bool hasS = defaults[((2 - rotSteps) % 4 + 4) % 4];
+            bool hasW = defaults[((3 - rotSteps) % 4 + 4) % 4];
+
+            float half = mw * 0.5f;
+            float wallHeight = 3f;
+            float wallThickness = 0.2f;
+            float doorWidth = 4f;
+
+            // If prefab has a door but graph doesn't need it, seal it.
+            // Seal positions use LOCAL coordinates — the parent is rotated so
+            // local +Z is always the prefab's original NORTH, regardless of
+            // world-space orientation. We need to seal in the LOCAL direction
+            // that corresponds to each WORLD direction after rotation.
+            // The need flags (needN/E/S/W) are in WORLD space.
+            // We must convert them to local space to know which local face to seal.
+            // Local face for world NORTH = rotate NORTH backward by rotSteps
+            int invRot = (4 - rotSteps) % 4;
+            // World directions mapped to local indices: N=0,E=1,S=2,W=3
+            // localIndex = (worldIndex + invRot) % 4
+            // Local face positions: 0=+Z, 1=+X, 2=-Z, 3=-X
+            bool[] worldNeed = { needN, needE, needS, needW };
+            bool[] worldHas = { hasN, hasE, hasS, hasW };
+
+            for (int dir = 0; dir < 4; dir++)
+            {
+                if (!worldHas[dir] || worldNeed[dir]) continue;
+
+                // Convert world direction to local direction
+                int localDir = (dir + invRot) % 4;
+                Vector3 pos = localDir switch
+                {
+                    0 => new Vector3(0, wallHeight * 0.5f, half),   // local NORTH (+Z)
+                    1 => new Vector3(half, wallHeight * 0.5f, 0),   // local EAST (+X)
+                    2 => new Vector3(0, wallHeight * 0.5f, -half),  // local SOUTH (-Z)
+                    3 => new Vector3(-half, wallHeight * 0.5f, 0),  // local WEST (-X)
+                    _ => Vector3.zero
+                };
+                Vector3 scale = (localDir == 0 || localDir == 2)
+                    ? new Vector3(doorWidth, wallHeight, wallThickness)
+                    : new Vector3(wallThickness, wallHeight, doorWidth);
+
+                SpawnSealWall(module.transform, pos, scale);
+            }
+        }
+
+        private void SpawnSealWall(Transform parent, Vector3 localPos, Vector3 scale)
+        {
+            GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "SealWall";
+            wall.transform.SetParent(parent);
+            wall.transform.localPosition = localPos;
+            wall.transform.localScale = scale;
+            wall.transform.localRotation = Quaternion.identity;
+
+            // Match existing wall material if possible
+            var existingWall = parent.Find("Floor");
+            if (existingWall != null)
+            {
+                var mat = existingWall.GetComponent<MeshRenderer>()?.sharedMaterial;
+                if (mat != null) wall.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            }
+        }
 
         private float GetModuleWidth()
         {
             if (moduleWidthOverride > 0f) return moduleWidthOverride;
             if (roomPrefabs != null && roomPrefabs.Length > 0 && roomPrefabs[0] != null)
                 return roomPrefabs[0].moduleWidth;
-            return 20f; // Default fallback
+            return 10f; // M1 FIX: Default matches 10x10 prefab standard
         }
 
         private RoomModule FindPrefabForShape(RoomShape shape)
         {
             if (roomPrefabs == null) return null;
 
-            // First pass: exact shape match
+            // Exact shape match only (M3 FIX: removed doorway-count fallback
+            // that could return STRAIGHT for CORNER or vice versa)
             foreach (var prefab in roomPrefabs)
             {
                 if (prefab != null && prefab.shape == shape)
                     return prefab;
             }
 
-            // Second pass: match by doorway count
-            int targetDoors = shape switch
-            {
-                RoomShape.CROSSROADS => 4,
-                RoomShape.T_JUNCTION => 3,
-                RoomShape.STRAIGHT => 2,
-                RoomShape.CORNER => 2,
-                RoomShape.DEAD_END => 1,
-                _ => 2
-            };
-
-            foreach (var prefab in roomPrefabs)
-            {
-                if (prefab != null && prefab.DoorwayCount() == targetDoors)
-                    return prefab;
-            }
-
+            Debug.LogWarning($"[FloorGenerator] No prefab with shape {shape} in the array.");
             return null;
         }
 

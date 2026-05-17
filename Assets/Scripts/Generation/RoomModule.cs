@@ -48,7 +48,7 @@ namespace Threshold.Generation
 
         [Header("Dimensions")]
         [Tooltip("Width/depth of the room module in world units. Rooms are square.")]
-        public float moduleWidth = 20f;
+        public float moduleWidth = 10f; // M1 FIX: matches 10x10 prefab standard
 
         // ====================================================================
         // Spatial Slots (assign in prefab)

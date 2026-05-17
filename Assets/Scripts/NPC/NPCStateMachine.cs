@@ -228,6 +228,9 @@ namespace Threshold.NPC
         {
             if (IsDead) return;
 
+            // C1 FIX: No-op if already in the requested state
+            if (CurrentState == newState) return;
+
             // ALLIED is one-way — cannot leave once entered
             if (CurrentState == NPCState.ALLIED && newState != NPCState.ALLIED)
             {
@@ -278,6 +281,9 @@ namespace Threshold.NPC
                     break;
 
                 case NPCState.SUPPRESS:
+                    // M4 FIX: Navigate to cover at base speed; stop on arrival in Update
+                    if (_agent != null && _agent.isOnNavMesh)
+                        _agent.speed = Stats.moveSpeed; // Temporarily use base speed to reach cover
                     NavigateToCover();
                     break;
 
@@ -347,7 +353,19 @@ namespace Threshold.NPC
 
         private void UpdatePatrol()
         {
-            if (patrolWaypoints == null || patrolWaypoints.Length == 0) return;
+            // M3 FIX: Random wander if no waypoints assigned
+            if (patrolWaypoints == null || patrolWaypoints.Length == 0)
+            {
+                if (_agent.isOnNavMesh && !_agent.pathPending && _agent.remainingDistance < 0.5f)
+                {
+                    Vector3 randomDir = UnityEngine.Random.insideUnitSphere * 4f;
+                    randomDir.y = 0f;
+                    Vector3 wanderTarget = transform.position + randomDir;
+                    if (NavMesh.SamplePosition(wanderTarget, out NavMeshHit hit, 5f, NavMesh.AllAreas))
+                        _agent.SetDestination(hit.position);
+                }
+                return;
+            }
 
             if (!_agent.pathPending && _agent.remainingDistance < 0.5f)
                 NavigateToNextWaypoint();
@@ -387,6 +405,13 @@ namespace Threshold.NPC
         private void UpdateSuppress()
         {
             if (_playerTarget == null) return;
+
+            // M4 FIX: Once arrived at cover, stop moving and lock in place
+            if (_agent.isOnNavMesh && !_agent.pathPending && _agent.remainingDistance < 1f)
+            {
+                _agent.isStopped = true;
+                _agent.speed = 0f;
+            }
 
             FaceTarget(_playerTarget.position);
             TryFire(_playerTarget.position); // High rate, low accuracy
@@ -536,7 +561,17 @@ namespace Threshold.NPC
 
         private void NavigateToFurthestCover()
         {
-            if (coverPoints == null || coverPoints.Length == 0 || _playerTarget == null) return;
+            if (_playerTarget == null) return;
+
+            // M1 FIX: If no cover points, fall back to moving directly away from player
+            if (coverPoints == null || coverPoints.Length == 0)
+            {
+                Vector3 awayDir = (transform.position - _playerTarget.position).normalized;
+                Vector3 retreatTarget = transform.position + awayDir * 8f;
+                if (_agent.isOnNavMesh && NavMesh.SamplePosition(retreatTarget, out NavMeshHit fallbackHit, 5f, NavMesh.AllAreas))
+                    _agent.SetDestination(fallbackHit.position);
+                return;
+            }
 
             Transform furthest = null;
             float maxDist = 0f;

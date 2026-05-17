@@ -1,0 +1,282 @@
+// ============================================================================
+// ThresholdUIManager.cs — Master UI coordinator
+// THRESHOLD — Google Antigravity Mobile Game Challenge 2026
+//
+// Central manager that initializes all UI systems, manages transitions
+// between gameplay and summary screens, and provides a unified API.
+// Add this single component to bootstrap the entire UI.
+// ============================================================================
+
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Threshold.UI
+{
+    /// <summary>
+    /// Master UI manager — add this component to a GameObject and it
+    /// bootstraps the entire THRESHOLD UI system at runtime.
+    /// </summary>
+    public class ThresholdUIManager : MonoBehaviour
+    {
+        // ====================================================================
+        // Configuration
+        // ====================================================================
+
+        [Header("Components (auto-created if null)")]
+        public TopDownCamera topDownCamera;
+        public VirtualJoystick joystick;
+        public GameplayHUD hud;
+        public DefectionPopup defectionPopup;
+        public RunSummaryScreen summaryScreen;
+
+        [Header("Canvas Settings")]
+        public int canvasSortOrder = 100;
+        public Vector2 referenceResolution = new(1080, 1920);
+
+        // ====================================================================
+        // State
+        // ====================================================================
+
+        /// <summary>True when the summary screen is visible.</summary>
+        public bool IsInSummary { get; private set; }
+
+        /// <summary>True when gameplay HUD is active.</summary>
+        public bool IsInGameplay => !IsInSummary;
+
+        // ====================================================================
+        // Singleton
+        // ====================================================================
+
+        public static ThresholdUIManager Instance { get; private set; }
+
+        // ====================================================================
+        // Lifecycle
+        // ====================================================================
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        private void Start()
+        {
+            EnsureCanvas();
+            EnsureEventSystem();
+            InitializeComponents();
+
+            Debug.Log("[ThresholdUI] All UI systems initialized.");
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+        }
+
+        // ====================================================================
+        // Initialization
+        // ====================================================================
+
+        private void EnsureCanvas()
+        {
+            if (FindAnyObjectByType<Canvas>() != null) return;
+
+            var canvasObj = new GameObject("THRESHOLD_Canvas");
+            var canvas = canvasObj.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = canvasSortOrder;
+
+            var scaler = canvasObj.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = referenceResolution;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            canvasObj.AddComponent<GraphicRaycaster>();
+        }
+
+        private void EnsureEventSystem()
+        {
+            if (FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() != null) return;
+
+            var esObj = new GameObject("EventSystem");
+            esObj.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+        }
+
+        private void InitializeComponents()
+        {
+            // Top-down camera — attach to main camera
+            if (topDownCamera == null)
+            {
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    topDownCamera = cam.gameObject.GetComponent<TopDownCamera>();
+                    if (topDownCamera == null)
+                        topDownCamera = cam.gameObject.AddComponent<TopDownCamera>();
+                }
+            }
+
+            // Virtual joystick
+            if (joystick == null)
+            {
+                joystick = FindAnyObjectByType<VirtualJoystick>();
+                if (joystick == null)
+                {
+                    var obj = new GameObject("VirtualJoystick");
+                    obj.transform.SetParent(transform);
+                    joystick = obj.AddComponent<VirtualJoystick>();
+                }
+            }
+
+            // Gameplay HUD
+            if (hud == null)
+            {
+                hud = FindAnyObjectByType<GameplayHUD>();
+                if (hud == null)
+                {
+                    var obj = new GameObject("GameplayHUD");
+                    obj.transform.SetParent(transform);
+                    hud = obj.AddComponent<GameplayHUD>();
+                }
+            }
+
+            // Defection popup
+            if (defectionPopup == null)
+            {
+                defectionPopup = FindAnyObjectByType<DefectionPopup>();
+                if (defectionPopup == null)
+                {
+                    var obj = new GameObject("DefectionPopup");
+                    obj.transform.SetParent(transform);
+                    defectionPopup = obj.AddComponent<DefectionPopup>();
+                }
+            }
+
+            // Run summary screen
+            if (summaryScreen == null)
+            {
+                summaryScreen = FindAnyObjectByType<RunSummaryScreen>();
+                if (summaryScreen == null)
+                {
+                    var obj = new GameObject("RunSummaryScreen");
+                    obj.transform.SetParent(transform);
+                    summaryScreen = obj.AddComponent<RunSummaryScreen>();
+                }
+            }
+
+            // Wire up the continue event
+            summaryScreen.OnContinue += HandleSummaryContinue;
+        }
+
+        // ====================================================================
+        // Public API — Game Loop Integration
+        // ====================================================================
+
+        /// <summary>
+        /// Initializes HUD for a new run.
+        /// </summary>
+        public void StartRun(int totalRooms)
+        {
+            IsInSummary = false;
+            hud.ResetForNewRun(totalRooms);
+            SetGameplayUIActive(true);
+            Debug.Log($"[ThresholdUI] Run started — {totalRooms} rooms");
+        }
+
+        /// <summary>
+        /// Shows the between-runs summary screen.
+        /// Pauses gameplay time scale.
+        /// </summary>
+        public void ShowRunSummary(RunSummaryData data)
+        {
+            IsInSummary = true;
+            SetGameplayUIActive(false);
+            summaryScreen.Show(data);
+            Time.timeScale = 0f;
+        }
+
+        /// <summary>
+        /// Shows a defection notification popup.
+        /// </summary>
+        public void ShowDefection(string npcId, string archetype = "")
+        {
+            defectionPopup.Show(npcId, archetype);
+        }
+
+        /// <summary>
+        /// Updates health on the HUD.
+        /// </summary>
+        public void UpdateHealth(float normalized)
+        {
+            hud.SetHealth(normalized);
+        }
+
+        /// <summary>
+        /// Updates ammo on the HUD.
+        /// </summary>
+        public void UpdateAmmo(int current, int max)
+        {
+            hud.SetAmmo(current, max);
+        }
+
+        /// <summary>
+        /// Records a kill on the HUD.
+        /// </summary>
+        public void RecordKill()
+        {
+            hud.AddKill();
+        }
+
+        /// <summary>
+        /// Updates room progress on the HUD.
+        /// </summary>
+        public void UpdateRoomProgress(int current, int total)
+        {
+            hud.SetRoomProgress(current, total);
+        }
+
+        /// <summary>
+        /// Gets the current movement input from the virtual joystick.
+        /// Returns Vector3 in world XZ space.
+        /// </summary>
+        public Vector3 GetMoveInput()
+        {
+            return joystick != null ? joystick.MoveDirection : Vector3.zero;
+        }
+
+        /// <summary>
+        /// Returns true while the fire button is held.
+        /// </summary>
+        public bool IsFireHeld()
+        {
+            return hud != null && hud.IsFiring;
+        }
+
+        /// <summary>
+        /// Shakes the camera (e.g. on hit or explosion).
+        /// </summary>
+        public void ShakeCamera(float intensity = 0.3f, float duration = 0.2f)
+        {
+            topDownCamera?.Shake(intensity, duration);
+        }
+
+        // ====================================================================
+        // Internal
+        // ====================================================================
+
+        private void SetGameplayUIActive(bool active)
+        {
+            if (joystick != null)
+                joystick.gameObject.SetActive(active);
+        }
+
+        private void HandleSummaryContinue()
+        {
+            IsInSummary = false;
+            Time.timeScale = 1f;
+            Debug.Log("[ThresholdUI] Summary dismissed — starting next run.");
+        }
+    }
+}

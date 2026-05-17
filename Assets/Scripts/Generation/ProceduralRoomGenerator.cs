@@ -32,8 +32,11 @@ namespace Threshold.Generation
             Random.InitState(seed);
 
             int roomCount = Mathf.Clamp(difficulty.targetRoomCount, 5, 12);
-            int gridSize = Mathf.CeilToInt(Mathf.Sqrt(roomCount * 2.5f));
+            // Tighter grid reduces L-route corridor inflation (was 2.5f)
+            int gridSize = Mathf.CeilToInt(Mathf.Sqrt(roomCount * 1.5f));
             gridSize = Mathf.Max(gridSize, 4);
+            // Cap total rooms (anchors + corridors) to prevent routing bloat
+            int maxTotalRooms = Mathf.CeilToInt(roomCount * 1.5f);
 
             var config = new RoomGraphConfig
             {
@@ -58,6 +61,20 @@ namespace Threshold.Generation
             Vector2Int entryPos = new(Random.Range(0, gridSize), 0);
             Vector2Int exitPos = new(Random.Range(0, gridSize), gridSize - 1);
 
+            // C1 FIX: Ensure entry and exit are never on the same cell
+            int exitRetries = 0;
+            while (exitPos == entryPos && exitRetries < 20)
+            {
+                exitPos = new(Random.Range(0, gridSize), gridSize - 1);
+                exitRetries++;
+            }
+            // If gridSize == 1 and they're stuck on the same cell, force separation
+            if (exitPos == entryPos)
+            {
+                exitPos = new(Mathf.Min(entryPos.x + 1, gridSize - 1), gridSize - 1);
+                if (exitPos == entryPos) exitPos = new(entryPos.x, Mathf.Min(1, gridSize - 1));
+            }
+
             string entryId = AddRoom(config, occupied, entryPos, RoomRole.ENTRY);
             string exitId = AddRoom(config, occupied, exitPos, RoomRole.EXIT);
 
@@ -77,6 +94,13 @@ namespace Threshold.Generation
                     interiorCount--;
                 }
             }
+
+            // C2 FIX: Warn if grid was too full to place all requested rooms
+            if (interiorCount > 0)
+            {
+                Debug.LogWarning($"[ProceduralRoomGenerator] Could only place {roomCount - 2 - interiorCount}" +
+                                 $" of {roomCount - 2} interior rooms. Grid may be too small.");
+            }
             anchors.Add(exitPos);
 
             // Step 3: Connect rooms via L-shaped corridor routing
@@ -85,8 +109,14 @@ namespace Threshold.Generation
 
             for (int i = 0; i < anchors.Count - 1; i++)
             {
-                ConnectRoomsLShaped(config, occupied, anchors[i], anchors[i + 1], gridSize);
+                // C3 FIX: Skip connection when source and target are the same cell
+                if (anchors[i] == anchors[i + 1]) continue;
+                ConnectRoomsLShaped(config, occupied, anchors[i], anchors[i + 1], gridSize, maxTotalRooms);
             }
+
+            int corridorCount = config.rooms.Count - roomCount;
+            if (corridorCount > 0)
+                Debug.Log($"[ProceduralRoomGenerator] Corridors: +{corridorCount} rooms (total: {config.rooms.Count}, target: {roomCount}, cap: {maxTotalRooms})");
 
             // Step 4: Determine shapes from actual doorway connections
             AssignShapesFromConnections(config);
@@ -130,7 +160,8 @@ namespace Threshold.Generation
         }
 
         private static void ConnectRoomsLShaped(RoomGraphConfig config,
-            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to, int gridSize)
+            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to,
+            int gridSize, int maxTotalRooms)
         {
             // L-shaped routing: move horizontally first, then vertically
             Vector2Int current = from;
@@ -140,7 +171,8 @@ namespace Threshold.Generation
             while (current.x != to.x)
             {
                 Vector2Int next = new(current.x + dirX, current.y);
-                EnsureRoomAndEdge(config, occupied, current, next, gridSize);
+                EnsureRoomAndEdge(config, occupied, current, next, gridSize, maxTotalRooms);
+                if (!occupied.ContainsKey(next)) break; // corridor cap hit
                 current = next;
             }
 
@@ -149,21 +181,28 @@ namespace Threshold.Generation
             while (current.y != to.y)
             {
                 Vector2Int next = new(current.x, current.y + dirY);
-                EnsureRoomAndEdge(config, occupied, current, next, gridSize);
+                EnsureRoomAndEdge(config, occupied, current, next, gridSize, maxTotalRooms);
+                if (!occupied.ContainsKey(next)) break; // corridor cap hit
                 current = next;
             }
         }
 
         private static void EnsureRoomAndEdge(RoomGraphConfig config,
-            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to, int gridSize)
+            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to,
+            int gridSize, int maxTotalRooms)
         {
             if (to.x < 0 || to.x >= gridSize || to.y < 0 || to.y >= gridSize) return;
 
-            // Ensure target room exists
+            // Ensure target room exists — respect corridor cap
             if (!occupied.ContainsKey(to))
             {
+                if (config.rooms.Count >= maxTotalRooms)
+                    return; // corridor cap reached, stop inflating
                 AddRoom(config, occupied, to, RoomRole.COMBAT);
             }
+
+            // Safety: source must exist to create edge
+            if (!occupied.ContainsKey(from)) return;
 
             string fromId = occupied[from];
             string toId = occupied[to];
@@ -218,6 +257,9 @@ namespace Threshold.Generation
 
         private static void AssignShapesFromConnections(RoomGraphConfig config)
         {
+            // C4 FIX: Track and remove rooms with 0 doorways (orphans)
+            var orphans = new List<RoomConfig>();
+
             foreach (var room in config.rooms)
             {
                 int doorCount = room.doorways.Count;
@@ -225,6 +267,23 @@ namespace Threshold.Generation
                 bool e = room.HasDoorway(Direction.EAST);
                 bool s = room.HasDoorway(Direction.SOUTH);
                 bool w = room.HasDoorway(Direction.WEST);
+
+                if (doorCount == 0)
+                {
+                    // Room has no connections — mark for removal
+                    if (room.role != RoomRole.ENTRY && room.role != RoomRole.EXIT)
+                    {
+                        orphans.Add(room);
+                        Debug.LogWarning($"[ProceduralRoomGenerator] Room {room.roomId} has 0 doorways. Removing orphan.");
+                    }
+                    else
+                    {
+                        // ENTRY/EXIT with 0 doors is a critical error
+                        room.shape = RoomShape.DEAD_END;
+                        Debug.LogError($"[ProceduralRoomGenerator] {room.role} room {room.roomId} has 0 doorways!");
+                    }
+                    continue;
+                }
 
                 room.shape = doorCount switch
                 {
@@ -234,6 +293,13 @@ namespace Threshold.Generation
                     1 => RoomShape.DEAD_END,
                     _ => RoomShape.DEAD_END
                 };
+            }
+
+            // Remove orphan rooms and their edges
+            foreach (var orphan in orphans)
+            {
+                config.rooms.Remove(orphan);
+                config.edges.RemoveAll(e => e.roomIdA == orphan.roomId || e.roomIdB == orphan.roomId);
             }
         }
 
@@ -270,12 +336,19 @@ namespace Threshold.Generation
                     }
                 }
 
-                // If no CROSSROADS found adjacent to exit, use any interior room
+                // M2 FIX: If no CROSSROADS, prefer rooms with ≥2 doorways for BOSS.
+                // DEAD_END should never be BOSS (only 1 exit = death trap).
                 if (!config.rooms.Exists(r => r.role == RoomRole.BOSS) && interiorRooms.Count > 0)
                 {
-                    var boss = interiorRooms[interiorRooms.Count - 1];
+                    // Priority: T_JUNCTION > CORNER/STRAIGHT > DEAD_END (last resort)
+                    var boss = interiorRooms.Find(r => r.shape == RoomShape.T_JUNCTION)
+                           ?? interiorRooms.Find(r => r.shape == RoomShape.STRAIGHT || r.shape == RoomShape.CORNER)
+                           ?? interiorRooms[interiorRooms.Count - 1];
                     boss.role = RoomRole.BOSS;
                     interiorRooms.Remove(boss);
+
+                    if (boss.shape == RoomShape.DEAD_END)
+                        Debug.LogWarning($"[ProceduralRoomGenerator] BOSS assigned to DEAD_END {boss.roomId} — no better room available.");
                 }
             }
 
@@ -288,17 +361,20 @@ namespace Threshold.Generation
                 }
             }
 
-            // Place PACING rooms every 2–3 combat rooms
+            // Place PACING rooms every 2–3 combat rooms, capped to prevent over-assignment
             int combatStreak = 0;
             int pacingInterval = difficulty.difficultyMultiplier > 1.5f ? 3 : 2;
+            int maxPacing = Mathf.Max(1, interiorRooms.Count / 3);
+            int pacingCount = 0;
             foreach (var room in interiorRooms)
             {
                 if (room.role != RoomRole.COMBAT) continue;
                 combatStreak++;
-                if (combatStreak >= pacingInterval)
+                if (combatStreak >= pacingInterval && pacingCount < maxPacing)
                 {
                     room.role = RoomRole.PACING;
                     combatStreak = 0;
+                    pacingCount++;
                 }
             }
 
@@ -360,6 +436,8 @@ namespace Threshold.Generation
                     });
                     elitesRemaining--;
                     enemyCount--;
+                    // C5 FIX: Clamp to prevent negative enemy count
+                    enemyCount = Mathf.Max(0, enemyCount);
                 }
 
                 // Fill remaining with mixed archetypes
@@ -448,6 +526,25 @@ namespace Threshold.Generation
                         {
                             triggerType = EventTriggerType.ON_CLEAR,
                             description = "Boss defeated — drop reward cache",
+                            parameter = 0
+                        });
+                        break;
+
+                    // L6 FIX: AMBUSH and COMBAT rooms get ON_ENTER trigger events
+                    case RoomRole.AMBUSH:
+                        room.events.Add(new EventConfig
+                        {
+                            triggerType = EventTriggerType.ON_ENTER,
+                            description = "Ambush triggered — delayed spawn wave",
+                            parameter = 1  // 1 = delayed spawn flag
+                        });
+                        break;
+
+                    case RoomRole.COMBAT:
+                        room.events.Add(new EventConfig
+                        {
+                            triggerType = EventTriggerType.ON_ENTER,
+                            description = "Combat engagement — spawn enemies",
                             parameter = 0
                         });
                         break;
@@ -572,6 +669,9 @@ namespace Threshold.Generation
             var entry = config.GetEntryRoom();
             if (entry == null) return;
 
+            // M6 FIX: Cap total rooms to prevent runaway corridor generation
+            int maxTotalRooms = gridSize * gridSize;
+
             var visited = new HashSet<string>();
             var queue = new Queue<string>();
             queue.Enqueue(entry.roomId);
@@ -591,13 +691,21 @@ namespace Threshold.Generation
             foreach (var room in config.rooms.ToList())
             {
                 if (visited.Contains(room.roomId)) continue;
+                if (config.rooms.Count >= maxTotalRooms)
+                {
+                    Debug.LogWarning($"[ProceduralRoomGenerator] Room cap ({maxTotalRooms}) reached. " +
+                                     $"Removing orphan {room.roomId} instead of connecting.");
+                    config.rooms.Remove(room);
+                    config.edges.RemoveAll(e => e.roomIdA == room.roomId || e.roomIdB == room.roomId);
+                    continue;
+                }
 
                 Vector2Int orphanPos = new(room.gridCol, room.gridRow);
                 Vector2Int nearest = FindNearestVisitedCell(orphanPos, visited, config);
 
                 if (nearest.x >= 0)
                 {
-                    ConnectRoomsLShaped(config, occupied, nearest, orphanPos, gridSize);
+                    ConnectRoomsLShaped(config, occupied, nearest, orphanPos, gridSize, int.MaxValue);
                     AssignShapesFromConnections(config);
                     visited.Add(room.roomId);
                 }

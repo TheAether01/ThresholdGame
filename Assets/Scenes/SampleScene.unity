@@ -491,7 +491,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4e4f5dcd685d8843acd395519df7cf1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Agents.GeminiAgentBridge
-  apiKey: 
+  apiKey: AIzaSyDskA2l0unvN61QXleWA65D_H7c10fyHpU
   apiBaseUrl: https://generativelanguage.googleapis.com/v1beta/models
   flashModelId: gemini-2.0-flash
   proModelId: gemini-2.0-pro

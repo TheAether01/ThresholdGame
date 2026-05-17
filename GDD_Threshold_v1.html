@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>THRESHOLD — Game Design Document v1.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy-900: #0a0e1a;
+    --navy-800: #0f1629;
+    --navy-700: #161d35;
+    --navy-600: #1e2746;
+    --navy-500: #2a3458;
+    --cyan-400: #22d3ee;
+    --cyan-500: #06b6d4;
+    --cyan-600: #0891b2;
+    --cyan-glow: rgba(34, 211, 238, 0.15);
+    --text-primary: #e8edf5;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-green: #34d399;
+    --accent-amber: #fbbf24;
+    --accent-rose: #fb7185;
+    --accent-purple: #a78bfa;
+    --border-subtle: rgba(148, 163, 184, 0.12);
+    --surface-card: rgba(15, 22, 41, 0.7);
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 15px; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--navy-900);
+    color: var(--text-primary);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; line-height: 1.25; }
+
+  /* === COVER PAGE === */
+  .cover {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    background: linear-gradient(170deg, var(--navy-900) 0%, #060a14 40%, var(--navy-800) 100%);
+    padding: 4rem 2rem;
+    position: relative;
+    overflow: hidden;
+    page-break-after: always;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -40%; left: -20%;
+    width: 140%; height: 180%;
+    background: radial-gradient(ellipse at 50% 30%, rgba(6, 182, 212, 0.07) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 70%, rgba(167, 139, 250, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .cover-badge {
+    display: inline-block;
+    padding: 0.4rem 1.4rem;
+    border: 1px solid var(--cyan-500);
+    border-radius: 100px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--cyan-400);
+    margin-bottom: 2.5rem;
+    position: relative;
+    z-index: 1;
+  }
+  .cover-title {
+    font-size: 5.5rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #ffffff 0%, var(--cyan-400) 50%, var(--accent-purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 1rem;
+    position: relative;
+    z-index: 1;
+  }
+  .cover-subtitle {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    margin-bottom: 3.5rem;
+    position: relative;
+    z-index: 1;
+  }
+  .cover-meta {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 1rem;
+  }
+  .cover-meta-item {
+    text-align: center;
+  }
+  .cover-meta-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.3rem;
+  }
+  .cover-meta-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .cover-line {
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan-500), transparent);
+    margin: 2.5rem auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* === LAYOUT === */
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3.5rem 3rem;
+    page-break-after: always;
+  }
+  .chapter-num {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--cyan-500);
+    margin-bottom: 0.5rem;
+  }
+  .chapter-title {
+    font-size: 2.2rem;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--cyan-500);
+  }
+  .chapter-desc {
+    font-size: 0.92rem;
+    color: var(--text-secondary);
+    margin-bottom: 2.5rem;
+    font-style: italic;
+  }
+
+  /* === HEADINGS === */
+  h3 {
+    font-size: 1.25rem;
+    color: var(--cyan-400);
+    margin: 2.2rem 0 0.8rem 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  h4 {
+    font-size: 1.05rem;
+    color: var(--text-primary);
+    margin: 1.5rem 0 0.6rem 0;
+  }
+
+  /* === TEXT === */
+  p { margin-bottom: 1rem; color: var(--text-secondary); }
+  strong { color: var(--text-primary); font-weight: 600; }
+  em { color: var(--cyan-400); font-style: normal; font-weight: 500; }
+
+  /* === LISTS === */
+  ul, ol { margin: 0.8rem 0 1.2rem 1.5rem; color: var(--text-secondary); }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--cyan-500); }
+
+  /* === TABLES === */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0 1.8rem 0;
+    font-size: 0.88rem;
+  }
+  thead th {
+    background: var(--navy-700);
+    color: var(--cyan-400);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 2px solid var(--cyan-600);
+  }
+  tbody td {
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: top;
+  }
+  tbody tr:hover { background: rgba(34, 211, 238, 0.03); }
+
+  /* === CARDS / CALLOUTS === */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1.2rem 0;
+  }
+  .card-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.6rem;
+  }
+  .callout {
+    border-left: 3px solid var(--cyan-500);
+    background: var(--cyan-glow);
+    padding: 1rem 1.3rem;
+    border-radius: 0 8px 8px 0;
+    margin: 1.2rem 0;
+    font-size: 0.9rem;
+  }
+  .callout-warn {
+    border-left-color: var(--accent-amber);
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  /* === CODE / JSON === */
+  pre {
+    background: #080c18;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+    margin: 1rem 0 1.5rem 0;
+  }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: rgba(34, 211, 238, 0.08);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--cyan-400);
+  }
+  .json-key { color: var(--cyan-400); }
+  .json-str { color: var(--accent-green); }
+  .json-num { color: var(--accent-amber); }
+  .json-comment { color: var(--text-muted); font-style: italic; }
+
+  /* === PILLAR GRID === */
+  .pillar-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .pillar {
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 1.3rem 1.5rem;
+    border-top: 3px solid var(--cyan-500);
+  }
+  .pillar h4 {
+    font-size: 0.85rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cyan-400);
+    margin: 0 0 0.5rem 0;
+  }
+  .pillar p { font-size: 0.88rem; margin: 0; }
+
+  /* === LOOP STEPS === */
+  .loop-step {
+    display: flex;
+    gap: 1.2rem;
+    margin-bottom: 1.2rem;
+    align-items: flex-start;
+  }
+  .loop-num {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--navy-600);
+    border: 2px solid var(--cyan-500);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--cyan-400);
+  }
+  .loop-content h4 { margin: 0 0 0.3rem 0; font-size: 1rem; }
+  .loop-content p { font-size: 0.88rem; margin: 0; }
+
+  /* === AGENT CARDS === */
+  .agent-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    border-left: 4px solid var(--cyan-500);
+  }
+  .agent-id {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    color: var(--cyan-500);
+    margin-bottom: 0.2rem;
+  }
+  .agent-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.1rem;
+  }
+  .agent-role {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.8rem;
+    font-style: italic;
+  }
+
+  /* === TAG / BADGE === */
+  .tag {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .tag-high { background: rgba(251, 113, 133, 0.15); color: var(--accent-rose); }
+  .tag-medium { background: rgba(251, 191, 36, 0.15); color: var(--accent-amber); }
+  .tag-low { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); }
+  .tag-cyan { background: rgba(34, 211, 238, 0.12); color: var(--cyan-400); }
+
+  /* === STATE BADGES === */
+  .state-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.8rem;
+    margin: 1.2rem 0;
+  }
+  .state-badge {
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    text-align: center;
+  }
+  .state-badge .label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--cyan-400);
+    letter-spacing: 0.08em;
+  }
+  .state-badge .desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+  }
+
+  /* === TIMELINE === */
+  .timeline-item {
+    position: relative;
+    padding-left: 2rem;
+    padding-bottom: 1.8rem;
+    border-left: 2px solid var(--navy-600);
+  }
+  .timeline-item:last-child { border-left-color: transparent; }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -6px; top: 4px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--cyan-500);
+    border: 2px solid var(--navy-900);
+  }
+  .timeline-item h4 { margin: 0 0 0.3rem 0; }
+  .timeline-item p { font-size: 0.88rem; margin: 0; }
+
+  /* === TOC === */
+  .toc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .toc-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .toc-num {
+    font-size: 0.8rem;
+    color: var(--cyan-500);
+    font-weight: 600;
+    margin-right: 1rem;
+    min-width: 28px;
+  }
+  .toc-label {
+    flex: 1;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .toc-dots {
+    flex: 1;
+    border-bottom: 1px dotted var(--text-muted);
+    margin: 0 0.8rem;
+    opacity: 0.3;
+  }
+
+  /* === PRINT === */
+  @media print {
+    body { background: #fff; color: #1a1a2e; }
+    .cover { background: #0a0e1a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { padding: 2rem 1.5rem; }
+    pre { border: 1px solid #ccc; }
+    table, th, td { border: 1px solid #ddd; }
+    .card, .agent-card, .pillar, .callout { border: 1px solid #ddd; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== COVER PAGE ==================== -->
+<div class="cover">
+  <div class="cover-badge">Game Design Document &bull; v1.1</div>
+  <h1 class="cover-title">THRESHOLD</h1>
+  <p class="cover-subtitle">Agentic AI-Driven Roguelite Shooter for Android</p>
+  <div class="cover-line"></div>
+  <div class="cover-meta">
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Competition</div>
+      <div class="cover-meta-value">Google Antigravity Mobile Game Challenge 2026</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Team</div>
+      <div class="cover-meta-value">The Aethers</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Platform</div>
+      <div class="cover-meta-value">Android &bull; Unity 6 URP</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Date</div>
+      <div class="cover-meta-value">May 2026</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 00 · TABLE OF CONTENTS ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 00</div>
+  <h2 class="chapter-title">Table of Contents</h2>
+  <ul class="toc-list">
+    <li><span class="toc-num">01</span><span class="toc-label">Game Vision &amp; Overview</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">02</span><span class="toc-label">Core Game Loop</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">03</span><span class="toc-label">Gemini Agent Architecture</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">04</span><span class="toc-label">Agent Trace Specification</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">05</span><span class="toc-label">Adaptive Difficulty System</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">06</span><span class="toc-label">NPC Behaviour &amp; Allegiance System</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">07</span><span class="toc-label">Procedural Level Generation</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">08</span><span class="toc-label">Retention &amp; Engagement Metrics</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">09</span><span class="toc-label">Baseline Comparison</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">10</span><span class="toc-label">Technology Stack</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">11</span><span class="toc-label">Development Roadmap</span><span class="toc-dots"></span></li>
+    <li><span class="toc-num">12</span><span class="toc-label">Privacy &amp; Cost Notes</span><span class="toc-dots"></span></li>
+  </ul>
+</div>
+
+<!-- ==================== 01 · GAME VISION & OVERVIEW ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 01</div>
+  <h2 class="chapter-title">Game Vision &amp; Overview</h2>
+  <p class="chapter-desc">What THRESHOLD is, who it's for, and why it exists.</p>
+
+  <h3>Concept Statement</h3>
+  <p><strong>THRESHOLD</strong> is a top-down 3D mobile shooter/roguelite for Android where no two runs are ever the same — and neither are the enemies. Powered by a <em>5-agent Gemini AI system</em> that observes every player decision, adapts the corridors they move through, retunes enemy tactics in real time, and even allows enemies to <em>defect to the player's side</em> when they recognise they can't win.</p>
+
+  <div class="callout">
+    <strong>One-line pitch:</strong> A roguelite where the AI doesn't just generate content — it <em>understands</em> the player and reshapes every run around their skill, strategy, and emotional state.
+  </div>
+
+  <h3>Design Pillars</h3>
+  <div class="pillar-grid">
+    <div class="pillar">
+      <h4>Adaptive</h4>
+      <p>The game reshapes itself around the player's skill, pacing, and strategy — not a difficulty slider.</p>
+    </div>
+    <div class="pillar">
+      <h4>Reactive AI</h4>
+      <p>Enemies observe and counter the player's dominant tactics in real time via Gemini-driven reasoning.</p>
+    </div>
+    <div class="pillar">
+      <h4>Procedural Depth</h4>
+      <p>Every corridor, encounter, and enemy mix is generated fresh per run and validated for fairness.</p>
+    </div>
+    <div class="pillar">
+      <h4>Agentic Clarity</h4>
+      <p>Every AI decision comes with a human-readable reasoning trace — fully inspectable, fully auditable.</p>
+    </div>
+  </div>
+
+  <h3>Platform &amp; Target Specs</h3>
+  <table>
+    <thead>
+      <tr><th>Parameter</th><th>Specification</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Platform</strong></td><td>Android (min SDK 29)</td></tr>
+      <tr><td><strong>Engine</strong></td><td>Unity 6, Universal Render Pipeline</td></tr>
+      <tr><td><strong>Target Device</strong></td><td>Mid-range Snapdragon 8 Gen 1+</td></tr>
+      <tr><td><strong>Session Length</strong></td><td>5–15 minutes, agent-tuned per player skill</td></tr>
+      <tr><td><strong>Controls</strong></td><td>Virtual joystick + tap-to-shoot (optional auto-aim assist)</td></tr>
+      <tr><td><strong>Genre</strong></td><td>Top-down shooter / Roguelite</td></tr>
+      <tr><td><strong>Perspective</strong></td><td>Top-down 3D</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Competition Context</h3>
+  <p>THRESHOLD is built for the <strong>Google Antigravity Mobile Game Challenge 2026</strong>. The game demonstrates agentic AI integration at every layer of the player experience — from procedural generation to real-time NPC reasoning to post-run analytics. Every Gemini call produces a <em>5-step reasoning trace</em> that judges can inspect, verify, and evaluate.</p>
+</div>
+
+<!-- ==================== 02 · CORE GAME LOOP ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 02</div>
+  <h2 class="chapter-title">Core Game Loop</h2>
+  <p class="chapter-desc">The six-step cycle that drives every run from cold open to post-run debrief.</p>
+
+  <div class="loop-step">
+    <div class="loop-num">1</div>
+    <div class="loop-content">
+      <h4>Start Run</h4>
+      <p>Director Agent reads last-run metrics and generates a difficulty profile. Level Gen Agent produces a corridor configuration. QC Agent validates the layout for solvability. Run begins.</p>
+    </div>
+  </div>
+  <div class="loop-step">
+    <div class="loop-num">2</div>
+    <div class="loop-content">
+      <h4>Enter Corridor</h4>
+      <p>Player enters procedurally stitched rooms. Enemies spawn according to the density setting from the Director. PlayerMetricsTracker begins recording all actions.</p>
+    </div>
+  </div>
+  <div class="loop-step">
+    <div class="loop-num">3</div>
+    <div class="loop-content">
+      <h4>Encounter</h4>
+      <p>NPC Brain Agent evaluates the player's strategy every 20 seconds and updates enemy tactics — choosing from <em>Flank</em>, <em>Suppress</em>, <em>Rush</em>, <em>Retreat</em>, or <em>Defect</em>. Random events may trigger mid-encounter.</p>
+    </div>
+  </div>
+  <div class="loop-step">
+    <div class="loop-num">4</div>
+    <div class="loop-content">
+      <h4>Room Clear</h4>
+      <p>Player clears all enemies. Accuracy, time-to-clear, health remaining, and resource usage are logged. Difficulty is adjusted at the micro-level for the next room.</p>
+    </div>
+  </div>
+  <div class="loop-step">
+    <div class="loop-num">5</div>
+    <div class="loop-content">
+      <h4>Threshold Reached</h4>
+      <p>The run ends when a termination condition is met. Reward Agent evaluates the player's effort and produces XP, bonuses, and incentive messaging.</p>
+    </div>
+  </div>
+  <div class="loop-step">
+    <div class="loop-num">6</div>
+    <div class="loop-content">
+      <h4>Between Runs</h4>
+      <p>Director reads full session data and produces a next-run profile with reasoning trace. The player sees a summary screen with an agent-authored explanation of what changed and why.</p>
+    </div>
+  </div>
+
+  <h3>Run Termination Conditions</h3>
+  <table>
+    <thead>
+      <tr><th>Condition</th><th>Trigger</th><th>Agent Involved</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Kill Quota</strong></td><td>Agent-set target reached</td><td>Director</td></tr>
+      <tr><td><strong>Floor Count</strong></td><td>5–12 rooms completed</td><td>Director</td></tr>
+      <tr><td><strong>Player Death</strong></td><td>Health reaches zero</td><td>—</td></tr>
+      <tr><td><strong>Session Fatigue</strong></td><td>Detected via engagement signals</td><td>Director</td></tr>
+      <tr><td><strong>Boss Elimination</strong></td><td>Floor boss defeated</td><td>Director / NPC Brain</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ==================== 03 · GEMINI AGENT ARCHITECTURE ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 03</div>
+  <h2 class="chapter-title">Gemini Agent Architecture</h2>
+  <p class="chapter-desc">Five specialised Gemini agents collaborate to drive every aspect of the player experience.</p>
+
+  <h3>Communication Layer</h3>
+  <p>All five agents call the Gemini API at runtime via <code>GeminiAgentBridge.cs</code> (async <code>UnityWebRequest</code>). Each receives a JSON game-state payload and returns a decision JSON with a mandatory 5-step reasoning trace.</p>
+
+  <div class="agent-card" style="border-left-color: var(--accent-purple);">
+    <div class="agent-id">A1</div>
+    <div class="agent-name">Director Agent</div>
+    <div class="agent-role">Orchestrator — Gemini Pro</div>
+    <p><strong>Observes:</strong> Deaths, kills, accuracy %, time-per-room, retry count, session length, quit events</p>
+    <p><strong>Decides:</strong> Difficulty multiplier (0.5×–2.5×), room count, enemy archetypes, event probability</p>
+  </div>
+
+  <div class="agent-card" style="border-left-color: var(--accent-green);">
+    <div class="agent-id">A2</div>
+    <div class="agent-name">Level Gen Agent</div>
+    <div class="agent-role">Generator — Gemini Pro</div>
+    <p><strong>Observes:</strong> Difficulty profile, player strategy patterns, last-run layout</p>
+    <p><strong>Decides:</strong> Room sequence, branching paths, spawn zones, item placement, event triggers</p>
+  </div>
+
+  <div class="agent-card" style="border-left-color: var(--accent-rose);">
+    <div class="agent-id">A3</div>
+    <div class="agent-name">NPC Brain Agent</div>
+    <div class="agent-role">Behaviour — Gemini Flash</div>
+    <p><strong>Observes:</strong> Player position, weapon, movement, kill streak, health, dominant tactic</p>
+    <p><strong>Decides:</strong> NPC state (PATROL / ATTACK / FLANK / SUPPRESS / RETREAT / ALLIED) — re-evaluated every 20 seconds</p>
+  </div>
+
+  <div class="agent-card" style="border-left-color: var(--accent-amber);">
+    <div class="agent-id">A4</div>
+    <div class="agent-name">QC Agent</div>
+    <div class="agent-role">Validator — Gemini Pro</div>
+    <p><strong>Observes:</strong> Generated level config — room graph, spawn points, solvability constraints</p>
+    <p><strong>Decides:</strong> ACCEPT or REJECT with reason; failure note returned to Level Gen for regeneration</p>
+  </div>
+
+  <div class="agent-card" style="border-left-color: var(--cyan-400);">
+    <div class="agent-id">A5</div>
+    <div class="agent-name">Reward Agent</div>
+    <div class="agent-role">Evaluator — Gemini Pro</div>
+    <p><strong>Observes:</strong> Run outcome, effort signals, improvement delta, retention risk, behavioural anomalies</p>
+    <p><strong>Decides:</strong> XP amount, bonus multiplier, unlock suggestion, incentive message</p>
+    <p><strong>Also performs:</strong> Fair play and anti-exploit checks — AFK detection, suspicious accuracy patterns, and input anomaly flagging. Can suggest optional next-run challenges (e.g. <em>"Clear 3 rooms without healing for 2× XP bonus"</em>).</p>
+  </div>
+</div>
+
+<!-- ==================== 04 · AGENT TRACE SPECIFICATION ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 04</div>
+  <h2 class="chapter-title">Agent Trace Specification</h2>
+  <p class="chapter-desc">Every Gemini call returns a 5-step reasoning trace — the primary artefact hackathon judges evaluate.</p>
+
+  <h3>Trace Format</h3>
+  <table>
+    <thead><tr><th>Step</th><th>Purpose</th><th>Content</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1. Observation</strong></td><td>Raw data intake</td><td>Game-state metrics as received from Unity</td></tr>
+      <tr><td><strong>2. Inference</strong></td><td>Pattern recognition</td><td>What the agent concludes — skill level, boredom risk, dominant pattern</td></tr>
+      <tr><td><strong>3. Decision</strong></td><td>Chosen action</td><td>Selected action with <em>why</em> explanation</td></tr>
+      <tr><td><strong>4. Action</strong></td><td>Structured output</td><td>JSON payload consumed by Unity systems</td></tr>
+      <tr><td><strong>5. Evaluation Plan</strong></td><td>Feedback loop</td><td>What to measure next to verify the decision worked</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Sample: Director Agent Trace</h3>
+<pre>{
+  <span class="json-key">"agent"</span>: <span class="json-str">"director"</span>,
+  <span class="json-key">"trace"</span>: {
+    <span class="json-key">"observation"</span>: {
+      <span class="json-key">"last_run_deaths"</span>: <span class="json-num">0</span>,
+      <span class="json-key">"avg_room_time"</span>: <span class="json-str">"14.2s"</span>,
+      <span class="json-key">"accuracy"</span>: <span class="json-str">"91%"</span>,
+      <span class="json-key">"rooms_completed"</span>: <span class="json-num">8</span>,
+      <span class="json-key">"retries"</span>: <span class="json-num">0</span>
+    },
+    <span class="json-key">"inference"</span>: <span class="json-str">"High-skill player. Boredom risk HIGH if difficulty unchanged. No deaths and fast clear times indicate mastery of current tier."</span>,
+    <span class="json-key">"decision"</span>: <span class="json-str">"Increase density 1.3x, introduce FLANK archetype, add 1 elite unit. Target 55-65% win rate to maintain engagement."</span>,
+    <span class="json-key">"action"</span>: {
+      <span class="json-key">"difficulty_multiplier"</span>: <span class="json-num">1.3</span>,
+      <span class="json-key">"elite_count"</span>: <span class="json-num">1</span>,
+      <span class="json-key">"npc_tactic"</span>: <span class="json-str">"FLANK"</span>,
+      <span class="json-key">"room_count"</span>: <span class="json-num">9</span>
+    },
+    <span class="json-key">"evaluation_plan"</span>: <span class="json-str">"Monitor: next_room_time > 30s AND accuracy &lt; 78% would confirm calibration. If deaths > 2 in first 3 rooms, rollback 0.2x."</span>
+  }
+}</pre>
+
+  <h3>Sample: QC Agent Rejection</h3>
+<pre>{
+  <span class="json-key">"agent"</span>: <span class="json-str">"qc"</span>,
+  <span class="json-key">"trace"</span>: {
+    <span class="json-key">"observation"</span>: <span class="json-str">"Level config received: 9 rooms, 3 branches, 24 spawn points."</span>,
+    <span class="json-key">"inference"</span>: <span class="json-str">"Room 4 has no valid exit path. Spawn zone in Room 2 overlaps player start position by 1.2m."</span>,
+    <span class="json-key">"decision"</span>: <span class="json-str">"REJECT — two critical failures detected. Returning to Level Gen for regeneration."</span>,
+    <span class="json-key">"action"</span>: {
+      <span class="json-key">"status"</span>: <span class="json-str">"REJECTED"</span>,
+      <span class="json-key">"failures"</span>: [
+        <span class="json-str">"room_4_no_exit_path"</span>,
+        <span class="json-str">"room_2_spawn_overlap_player_start"</span>
+      ],
+      <span class="json-key">"regen_attempt"</span>: <span class="json-num">1</span>
+    },
+    <span class="json-key">"evaluation_plan"</span>: <span class="json-str">"Re-validate on next Level Gen output. If 3 consecutive rejections, fallback to safe layout template."</span>
+  }
+}</pre>
+</div>
+
+<!-- ==================== 05 · ADAPTIVE DIFFICULTY SYSTEM ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 05</div>
+  <h2 class="chapter-title">Adaptive Difficulty System</h2>
+  <p class="chapter-desc">How the Director Agent reasons over 7 player signals to tune every run — no difficulty slider, no static rules.</p>
+
+  <h3>Player Signal Matrix</h3>
+  <p>The Director Agent ingests 7 real-time player signals (hackathon requirement: 5+). Each signal has a weight priority and a behavioural response.</p>
+  <table>
+    <thead><tr><th>Signal</th><th>Priority</th><th>Interpretation &amp; Response</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Completion Time</strong></td><td><span class="tag tag-high">High</span></td><td>Room timer vs par. Fast = increase density. Slow = reduce spawns.</td></tr>
+      <tr><td><strong>Accuracy %</strong></td><td><span class="tag tag-high">High</span></td><td>Above 85% sustained = add evasive enemy archetypes.</td></tr>
+      <tr><td><strong>Death Count</strong></td><td><span class="tag tag-high">High</span></td><td>3+ deaths = decrease difficulty + inject contextual hints.</td></tr>
+      <tr><td><strong>Retry Behaviour</strong></td><td><span class="tag tag-medium">Medium</span></td><td>Quick retries = frustration detected. Widen corridors, reduce ambushes.</td></tr>
+      <tr><td><strong>Resource Efficiency</strong></td><td><span class="tag tag-medium">Medium</span></td><td>Low ammo per kill = skilled player. Trigger elite archetype spawns.</td></tr>
+      <tr><td><strong>Session Length</strong></td><td><span class="tag tag-low">Low</span></td><td>Short sessions + rage-quit pattern = reduce difficulty on next cold open.</td></tr>
+      <tr><td><strong>Win/Loss Streak</strong></td><td><span class="tag tag-high">High</span></td><td>3 wins = guaranteed spike. 3 losses = guaranteed ease-off.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Agentic vs. Rule-Based — The Critical Distinction</h3>
+  <div class="callout callout-warn">
+    <strong>This is AGENTIC, not rule-based.</strong> A statement like <code>if deaths > 3: difficulty -= 1</code> is <em>not acceptable</em>. The agent reasons over all 7 signals holistically to produce a nuanced decision.
+  </div>
+  <div class="card">
+    <div class="card-title">Example: Agentic Reasoning in Action</div>
+    <p><em>"Player died 4 times but accuracy was 89% and retry was immediate — the layout was likely unfair, not the player. Recommend restructuring room topology rather than reducing enemy count. Deaths were concentrated in Room 4 (choke point with no flanking option). Widening the corridor by one tile and adding a second cover position should resolve without reducing challenge."</em></p>
+  </div>
+  <p>This contrasts with a naive rule that would simply reduce enemy count — missing the root cause entirely. The agentic approach considers <strong>why</strong> the player struggled, not just <strong>that</strong> they struggled.</p>
+
+  <h3>Mid-Run Micro-Adjustment</h3>
+  <p>Between rooms, a lightweight <strong>local system</strong> (no Gemini call) can apply small tweaks to the next room's spawns. This complements the full Director Agent reasoning that happens between runs.</p>
+  <div class="card">
+    <div class="card-title">Examples of Micro-Adjustments</div>
+    <ul>
+      <li>Player health below 30% → inject a health kit into the next room's loot table</li>
+      <li>Clear time significantly under par → add +1 enemy to the next room's spawn count</li>
+      <li>Ammo critically low → place an ammo cache near the room entrance</li>
+    </ul>
+  </div>
+  <div class="callout">
+    <strong>Note:</strong> Micro-adjustments are deterministic, threshold-based, and deliberately limited in scope. The Director Agent handles all holistic, multi-signal reasoning at the run boundary.
+  </div>
+</div>
+
+<!-- ==================== 06 · NPC BEHAVIOUR & ALLEGIANCE ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 06</div>
+  <h2 class="chapter-title">NPC Behaviour &amp; Allegiance System</h2>
+  <p class="chapter-desc">A 6-state machine driven by the NPC Brain Agent — not hard-coded transitions, but reasoned AI decisions.</p>
+
+  <h3>NPC State Machine</h3>
+  <div class="state-grid">
+    <div class="state-badge"><div class="label">PATROL</div><div class="desc">Default. Follows waypoints.</div></div>
+    <div class="state-badge"><div class="label">ATTACK</div><div class="desc">Direct fire when player is exposed.</div></div>
+    <div class="state-badge"><div class="label">FLANK</div><div class="desc">Routes to off-axis position when player is stationary.</div></div>
+    <div class="state-badge"><div class="label">SUPPRESS</div><div class="desc">Rapid fire from cover when player is reloading / low health.</div></div>
+    <div class="state-badge"><div class="label">RETREAT</div><div class="desc">Falls back when NPC health is critical.</div></div>
+    <div class="state-badge" style="border-color: var(--accent-green);"><div class="label" style="color: var(--accent-green);">ALLIED ★</div><div class="desc">Defection — NPC joins the player's team.</div></div>
+  </div>
+
+  <h3>Defection: The Signature Feature</h3>
+  <p>When the NPC Brain Agent determines an NPC's survival probability is <strong>near zero</strong> AND the player hasn't exploited downed enemies, it can trigger <em>defection</em>. The NPC lowers its weapon, a UI prompt appears, and the NPC begins attacking its former allies.</p>
+  <p>Defection is <strong>probabilistic</strong> — the Brain Agent also weighs enemy team state, current difficulty tier, and whether adding an ally would make the encounter trivially easy.</p>
+
+  <h3>Defection Trace Example</h3>
+  <div class="card">
+    <div class="card-title">NPC Brain Agent — 5-Step Defection Trace</div>
+    <table>
+      <thead><tr><th>Step</th><th>Content</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Observe</strong></td><td>Kill streak 5+. NPC-04 health &lt; 20%. Player hasn't exploited downed enemies. 3 allied NPCs remain.</td></tr>
+        <tr><td><strong>Infer</strong></td><td>Continued opposition = certain death for NPC-04. Defection = survival. Player behaviour suggests mercy-oriented playstyle.</td></tr>
+        <tr><td><strong>Decide</strong></td><td>Trigger defection for NPC-04. Weighed against: ally count (0 current allies), difficulty tier (1.3×), team morale impact.</td></tr>
+        <tr><td><strong>Act</strong></td><td>State → ALLIED. Weapon lowered animation. UI prompt: <em>"NPC-04 has surrendered and joined your side."</em></td></tr>
+        <tr><td><strong>Evaluate</strong></td><td>Did defected NPC help player survive next 2 rooms? Was encounter difficulty still meaningful?</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>NPC Archetypes</h3>
+  <table>
+    <thead><tr><th>Type</th><th>HP</th><th>Fire Rate</th><th>Accuracy</th><th>Speed</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td><strong>GRUNT</strong></td><td>100</td><td>1.0 shots/s</td><td>40%</td><td>Normal</td><td>Baseline infantry, cannon fodder in large groups</td></tr>
+      <tr><td><strong>FLANKER</strong></td><td>80</td><td>1.2 shots/s</td><td>50%</td><td>Fast</td><td>Repositions aggressively, exploits player blind spots</td></tr>
+      <tr><td><strong>SUPPRESSOR</strong></td><td>120</td><td>2.0 shots/s</td><td>25%</td><td>Slow</td><td>High-volume fire from cover, pins player in position</td></tr>
+      <tr><td><strong>ELITE</strong></td><td>250</td><td>1.5 shots/s</td><td>60%</td><td>Normal</td><td>Boss-level threat, deployed sparingly by Director Agent</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Defection Constraints</h3>
+  <div class="card">
+    <div class="card-title">Hard Limits on Defection</div>
+    <ul>
+      <li>Maximum <strong>1 defection per room</strong> — prevents mass surrender</li>
+      <li>Maximum <strong>2 defected allies per run</strong> — preserves challenge integrity</li>
+      <li><strong>ELITE NPCs almost never defect</strong> unless they are the last enemy standing</li>
+      <li><strong>No defection</strong> if it would make the encounter trivially easy (Brain Agent evaluates remaining enemy strength)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ==================== 07 · PROCEDURAL LEVEL GENERATION ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 07</div>
+  <h2 class="chapter-title">Procedural Level Generation</h2>
+  <p class="chapter-desc">Every floor is unique — generated by AI, validated by AI, and instantiated by Unity.</p>
+
+  <h3>Generation Pipeline</h3>
+  <ol>
+    <li><strong>Director Agent</strong> produces a difficulty profile (multiplier, room count, archetype mix).</li>
+    <li><strong>Level Gen Agent</strong> creates a room graph — sequence, branching, spawn zones, items, events.</li>
+    <li><strong>QC Agent</strong> validates the layout. Returns ACCEPT or REJECT with reason. Maximum 3 rejection attempts; then fallback to a pre-validated safe layout.</li>
+    <li><code>FloorGenerator.cs</code> instantiates rooms in Unity from the validated configuration.</li>
+  </ol>
+
+  <h3>Room Prefab Shapes (5 Physical Types)</h3>
+  <table>
+    <thead><tr><th>Shape</th><th>Doorways</th><th>Layout Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>STRAIGHT</strong></td><td>2 (opposite)</td><td>Linear corridor — simplest traversal path</td></tr>
+      <tr><td><strong>T-JUNCTION</strong></td><td>3</td><td>Branching path — creates route decisions</td></tr>
+      <tr><td><strong>CROSSROADS</strong></td><td>4</td><td>Open intersection — maximum connectivity</td></tr>
+      <tr><td><strong>CORNER</strong></td><td>2 (adjacent)</td><td>L-shaped bend — restricted sightlines</td></tr>
+      <tr><td><strong>DEAD END</strong></td><td>1</td><td>Terminal branch — forces backtracking</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Shape vs. Role Separation</h3>
+  <p>A room's <strong>physical shape</strong> (which prefab) is independent from its <strong>gameplay role</strong> (what happens inside). The same T-Junction can be a calm pacing room or a deadly ambush — the Level Gen Agent decides the role assignment based on the Director's difficulty profile and the player's recent performance.</p>
+
+  <h4>Gameplay Roles (8 Types)</h4>
+  <table>
+    <thead><tr><th>Role</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ENTRY</strong></td><td>Player spawn point. Safe, no enemies. Establishes orientation.</td></tr>
+      <tr><td><strong>EXIT</strong></td><td>Run endpoint, reached after boss encounter. Triggers run summary.</td></tr>
+      <tr><td><strong>PACING</strong></td><td>Breathing room between fights. Low threat, resource recovery.</td></tr>
+      <tr><td><strong>COMBAT</strong></td><td>Standard enemy encounter. Core gameplay loop.</td></tr>
+      <tr><td><strong>AMBUSH</strong></td><td>Surprise spawns triggered by player movement or position.</td></tr>
+      <tr><td><strong>BOSS</strong></td><td>Elite encounter. Hardest room in the run, typically ELITE NPC.</td></tr>
+      <tr><td><strong>LOOT</strong></td><td>Optional branch with rewards or traps. Risk/reward decision.</td></tr>
+      <tr><td><strong>CHOKE</strong></td><td>Narrow tactical room favouring suppression-style combat.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Example:</strong> A CORNER prefab assigned the AMBUSH role spawns enemies behind the L-bend when the player rounds the corner. The same CORNER prefab assigned the LOOT role places a reward cache around the bend with a trap trigger.
+  </div>
+</div>
+
+<!-- ==================== 08 · RETENTION & ENGAGEMENT ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 08</div>
+  <h2 class="chapter-title">Retention &amp; Engagement Metrics</h2>
+  <p class="chapter-desc">Eight metrics tracked by PlayerMetricsTracker.cs, all fed to the Director Agent for next-run decisions.</p>
+
+  <table>
+    <thead><tr><th>Metric</th><th>Description</th><th>Agent Use</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Session Length</strong></td><td>Total time per session</td><td>Fatigue detection, pacing adjustments</td></tr>
+      <tr><td><strong>Retry Count</strong></td><td>Number of immediate retries</td><td>Frustration indicator → reduce difficulty</td></tr>
+      <tr><td><strong>Churn Risk Score</strong></td><td>Gemini-computed probability of player leaving</td><td>Trigger retention interventions</td></tr>
+      <tr><td><strong>Spike Abandonment</strong></td><td>Quits during difficulty spikes</td><td>Calibrate spike intensity</td></tr>
+      <tr><td><strong>Challenge Acceptance</strong></td><td>Rate of accepting optional challenges</td><td>Gauge appetite for difficulty</td></tr>
+      <tr><td><strong>Feature Exploration</strong></td><td>Usage of different weapons, paths, tactics</td><td>Encourage variety via rewards</td></tr>
+      <tr><td><strong>Satisfaction Proxy</strong></td><td>Session length delta (this vs. last)</td><td>Positive delta = good calibration</td></tr>
+      <tr><td><strong>Improvement Delta</strong></td><td>Accuracy + time vs. last run</td><td>Skill progression tracking</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ==================== 09 · BASELINE COMPARISON ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 09</div>
+  <h2 class="chapter-title">Baseline Comparison</h2>
+  <p class="chapter-desc">FixedRuleDirector mode provides the +5% hackathon bonus by demonstrating measurable agentic improvement.</p>
+
+  <h3>Fixed Rule Baseline</h3>
+  <div class="card">
+    <div class="card-title">FixedRuleDirector — Static Rules (No Context)</div>
+    <ul>
+      <li><code>if deaths > 3: difficulty -= 1</code> — no consideration of <em>why</em> the player died</li>
+      <li><code>if run_won: difficulty += 1</code> — ignores how easily the player won</li>
+      <li>NPCs: ATTACK state always — no tactical adaptation</li>
+      <li>Levels: random selection from 5 fixed templates</li>
+      <li>Rewards: flat XP per kill — no effort evaluation</li>
+    </ul>
+  </div>
+
+  <h3>Expected Performance Comparison</h3>
+  <table>
+    <thead><tr><th>Metric</th><th style="color: var(--cyan-400);">Agentic (THRESHOLD)</th><th style="color: var(--text-muted);">Fixed Rule Baseline</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Avg. Session Length</strong></td><td>10–13 minutes</td><td>6–8 minutes</td></tr>
+      <tr><td><strong>Retry Rate</strong></td><td>35%</td><td>55%</td></tr>
+      <tr><td><strong>Rooms Completed / Run</strong></td><td>7.5</td><td>5.2</td></tr>
+      <tr><td><strong>Win Rate</strong></td><td>~55% (targeted)</td><td>~40% or ~80% (uncalibrated)</td></tr>
+      <tr><td><strong>NPC Defection</strong></td><td>Present (agent-driven)</td><td>Never</td></tr>
+      <tr><td><strong>Difficulty Calibration</strong></td><td>Per-signal, contextual</td><td>Single-variable, blind</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ==================== 10 · TECHNOLOGY STACK ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 10</div>
+  <h2 class="chapter-title">Technology Stack</h2>
+  <p class="chapter-desc">Engine, API, tools, and build agent architecture.</p>
+
+  <h3>Core Technologies</h3>
+  <table>
+    <thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Engine</strong></td><td>Unity 6 (URP)</td><td>Universal Render Pipeline for mobile performance</td></tr>
+      <tr><td><strong>IDE</strong></td><td>Google Antigravity IDE</td><td>Agentic development workflow</td></tr>
+      <tr><td><strong>AI Backend</strong></td><td>Gemini API</td><td>Flash (NPC Brain), Pro (Director, Level Gen, Reward)</td></tr>
+      <tr><td><strong>Platform</strong></td><td>Android</td><td>Min SDK 29</td></tr>
+      <tr><td><strong>Persistence</strong></td><td>JSON</td><td>Session-scoped, local file storage</td></tr>
+      <tr><td><strong>Networking</strong></td><td>Async UnityWebRequest</td><td>Non-blocking Gemini API calls</td></tr>
+      <tr><td><strong>Conventions</strong></td><td>Antigravity Skills files</td><td>Architecture patterns for build agents</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Build Agent Architecture</h3>
+  <p>4 parallel build agents via the Antigravity Manager Surface, each owning a core system:</p>
+  <table>
+    <thead><tr><th>Agent</th><th>Owned File</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag tag-cyan">A</span></td><td><code>ProceduralRoomGenerator.cs</code></td><td>Room prefab instantiation, layout stitching</td></tr>
+      <tr><td><span class="tag tag-cyan">B</span></td><td><code>PlayerMetricsTracker.cs</code></td><td>Signal collection, session analytics</td></tr>
+      <tr><td><span class="tag tag-cyan">C</span></td><td><code>GeminiAgentBridge.cs</code></td><td>API communication, trace parsing</td></tr>
+      <tr><td><span class="tag tag-cyan">D</span></td><td><code>NPCStateMachine.cs</code></td><td>6-state behaviour, defection logic</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ==================== 11 · DEVELOPMENT ROADMAP ==================== -->
+<div class="page">
+  <div class="chapter-num">Chapter 11</div>
+  <h2 class="chapter-title">Development Roadmap</h2>
+  <p class="chapter-desc">Five sequential phases from workspace setup to final submission. Skills files updated between phases so later agents inherit architecture.</p>
+
+  <div class="timeline-item">
+    <h4>Phase 1 — Foundation</h4>
+    <p>Install Antigravity, configure Unity workspace, define Skills files, build <code>GeminiAgentBridge.cs</code>, verify API connectivity end-to-end.</p>
+  </div>
+  <div class="timeline-item">
+    <h4>Phase 2 — Core Systems</h4>
+    <p>Spawn parallel build agents for <code>ProceduralRoomGenerator</code>, <code>PlayerMetricsTracker</code>, <code>NPCStateMachine</code>. Wire all systems to the bridge. Director Agent end-to-end. First playable run achieved.</p>
+  </div>
+  <div class="timeline-item">
+    <h4>Phase 3 — Agent Intelligence</h4>
+    <p>Level Gen + QC Agent integrated with reject/regen loop. NPC Brain Agent with all 6 states + defection. Reward Agent operational. Debug panel with live traces.</p>
+  </div>
+  <div class="timeline-item">
+    <h4>Phase 4 — Baseline &amp; Polish</h4>
+    <p>FixedRuleDirector baseline implemented. Comparison metrics captured. UI polish (camera, joystick, HUD). Mobile performance pass (ASTC textures, draw call batching, 60fps target).</p>
+  </div>
+  <div class="timeline-item">
+    <h4>Phase 5 — Delivery</h4>
+    <p>Demo video, Antigravity workflow video, trace export, README, architecture map, APK build, device testing, final submission.</p>
+  </div>
+</div>
+
+<!-- ==================== 12 · PRIVACY & COST ==================== -->
+<div class="page" style="page-break-after: avoid;">
+  <div class="chapter-num">Chapter 12</div>
+  <h2 class="chapter-title">Privacy &amp; Cost Notes</h2>
+  <p class="chapter-desc">Data handling, API cost projections, and latency targets.</p>
+
+  <h3>Data Privacy</h3>
+  <ul>
+    <li>No raw personal data is stored. All player signals are <strong>numeric</strong>, <strong>session-scoped</strong>, and <strong>anonymised</strong> before any Gemini API call.</li>
+    <li>Development and testing use mock data exclusively.</li>
+    <li>No data leaves the device except anonymised JSON payloads to the Gemini API.</li>
+  </ul>
+
+  <h3>API Cost Estimates</h3>
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Director calls</strong></td><td>1× per run</td></tr>
+      <tr><td><strong>NPC Brain calls</strong></td><td>1× per 20 seconds</td></tr>
+      <tr><td><strong>QC calls</strong></td><td>1–2× per run</td></tr>
+      <tr><td><strong>Flash cost</strong></td><td>~$0.000075 / call</td></tr>
+      <tr><td><strong>Calls per session</strong></td><td>~10</td></tr>
+      <tr><td><strong>Cost per session</strong></td><td>&lt; $0.002</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Scaling Projections</h3>
+  <table>
+    <thead><tr><th>Scale</th><th>Estimated Daily Cost</th><th>Infrastructure</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1K DAU</strong></td><td>~$2/day</td><td>Gemini free tier</td></tr>
+      <tr><td><strong>10K DAU</strong></td><td>~$20/day</td><td>Vertex AI</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Latency Targets</h3>
+  <table>
+    <thead><tr><th>Agent</th><th>Model</th><th>Target Latency</th><th>Execution</th></tr></thead>
+    <tbody>
+      <tr><td><strong>NPC Brain</strong></td><td>Flash</td><td>&lt; 800ms</td><td>Async, non-blocking</td></tr>
+      <tr><td><strong>Director</strong></td><td>Pro</td><td>&lt; 2s</td><td>Async, between rooms</td></tr>
+      <tr><td><strong>Level Gen</strong></td><td>Pro</td><td>&lt; 2s</td><td>Async, run start</td></tr>
+      <tr><td><strong>QC</strong></td><td>Pro</td><td>&lt; 1.5s</td><td>Async, post-generation</td></tr>
+      <tr><td><strong>Reward</strong></td><td>Pro</td><td>&lt; 2s</td><td>Async, run end</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ==================== FOOTER ==================== -->
+<div style="text-align: center; padding: 3rem 2rem 4rem; color: var(--text-muted); font-size: 0.8rem; border-top: 1px solid var(--border-subtle); max-width: 900px; margin: 0 auto;">
+  <p style="margin-bottom: 0.3rem; font-family: 'Space Grotesk', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.7rem; color: var(--cyan-500);">THRESHOLD</p>
+  <p style="margin-bottom: 0.3rem;">Game Design Document v1.1 &bull; May 2026</p>
+  <p>The Aethers &bull; Google Antigravity Mobile Game Challenge 2026</p>
+  <p style="margin-top: 1rem; font-size: 0.7rem; color: var(--text-muted); opacity: 0.6;">CONFIDENTIAL — For hackathon evaluation purposes only.</p>
+</div>
+
+</body>
+</html>

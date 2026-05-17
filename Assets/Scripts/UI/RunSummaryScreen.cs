@@ -113,6 +113,19 @@ namespace Threshold.UI
         private void Start()
         {
             _canvas = FindAnyObjectByType<Canvas>();
+            // M6: Auto-create canvas if none exists yet (script execution order safety)
+            if (_canvas == null)
+            {
+                var canvasObj = new GameObject("UI_Canvas");
+                _canvas = canvasObj.AddComponent<Canvas>();
+                _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                _canvas.sortingOrder = 100;
+                var scaler = canvasObj.AddComponent<CanvasScaler>();
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                scaler.referenceResolution = new Vector2(1080, 1920);
+                scaler.matchWidthOrHeight = 0.5f;
+                canvasObj.AddComponent<GraphicRaycaster>();
+            }
             BuildUI();
             _root.SetActive(false);
         }

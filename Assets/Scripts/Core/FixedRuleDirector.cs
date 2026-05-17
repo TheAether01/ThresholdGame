@@ -295,9 +295,13 @@ namespace Threshold.Core
             {
                 difficultyLevel = difficultyLevel
             };
+            _runStartMode = activeMode;
 
             Debug.Log($"[{activeMode}] Run started — Difficulty {difficultyLevel}");
         }
+
+        /// <summary>Mode that was active when the current run started.</summary>
+        private DirectorMode _runStartMode;
 
         /// <summary>
         /// Records a room completion during the current run.
@@ -343,6 +347,15 @@ namespace Threshold.Core
         public void EndRun(bool won, int totalRooms)
         {
             if (_currentRun == null) return;
+
+            // M7: Guard against mode switch mid-run
+            if (_runStartMode != activeMode)
+            {
+                Debug.LogWarning($"[FixedRuleDirector] Mode changed mid-run ({_runStartMode} → {activeMode}). " +
+                                 "Discarding run to avoid cross-contamination.");
+                _currentRun = null;
+                return;
+            }
 
             _currentRun.durationSeconds = Time.time - _runStartTime;
             _currentRun.runWon = won;

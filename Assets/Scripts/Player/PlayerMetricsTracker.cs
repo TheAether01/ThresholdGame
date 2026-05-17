@@ -151,6 +151,7 @@ namespace Threshold.Player
         private RoomMetrics _currentRoom;
         private float _runStartTime;
         private string _savePath;
+        private bool _runEnded;
 
         // Live signals (updated each frame or on events)
         private float _currentPlayerHealth = 1f;
@@ -185,6 +186,13 @@ namespace Threshold.Player
 
         public void OnRunStart()
         {
+            // C2: Auto-finalize orphan run if previous wasn't ended
+            if (_currentRun != null && !_runEnded)
+            {
+                Debug.LogWarning("[PlayerMetrics] Previous run not ended — auto-finalizing as LOSS.");
+                OnRunEnd(false);
+            }
+
             float now = Time.realtimeSinceStartup;
             float gap = _history.lastRunEndTime > 0 ? now - _history.lastRunEndTime : -1f;
 
@@ -197,6 +205,7 @@ namespace Threshold.Player
                 wasQuickRetry = gap >= 0 && gap < quickRetryThreshold
             };
             _runStartTime = now;
+            _runEnded = false;
 
             if (_currentRun.wasQuickRetry)
             {
@@ -209,7 +218,8 @@ namespace Threshold.Player
 
         public void OnRunEnd(bool won)
         {
-            if (_currentRun == null) return;
+            if (_currentRun == null || _runEnded) return;
+            _runEnded = true;
 
             // Finalize current room if still open
             if (_currentRoom != null) FinalizeRoom();
@@ -314,7 +324,9 @@ namespace Threshold.Player
 
         public void OnShotHit()
         {
-            if (_currentRoom != null) _currentRoom.shotsHit++;
+            // C3: Clamp shotsHit to never exceed shotsFired (spread weapons)
+            if (_currentRoom != null && _currentRoom.shotsHit < _currentRoom.shotsFired)
+                _currentRoom.shotsHit++;
         }
 
         public void OnEnemyKilled()
@@ -435,7 +447,7 @@ namespace Threshold.Player
         /// </summary>
         public MicroAdjustment GetMicroAdjustment()
         {
-            var adj = new MicroAdjustment { enemyCountDelta = 0 };
+            var adj = new MicroAdjustment { enemyCountDelta = 0, reason = "" };
 
             // Health critically low → inject health kit
             if (_currentPlayerHealth < healthKitThreshold)

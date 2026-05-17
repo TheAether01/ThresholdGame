@@ -62,6 +62,7 @@ namespace Threshold.UI
         private Vector3 _currentLookAhead;
         private Vector3 _targetLookAhead;
         private Vector3 _velocity;
+        private Rigidbody _cachedRb;
 
         // ====================================================================
         // Singleton (optional — for easy reference)
@@ -87,8 +88,10 @@ namespace Threshold.UI
                 if (playerObj != null) target = playerObj.transform;
             }
 
+            // C5: Cache Rigidbody once instead of per-frame GetComponent
             if (target != null)
             {
+                _cachedRb = target.GetComponent<Rigidbody>();
                 // Snap to initial position (no smoothing on first frame)
                 transform.position = CalculateDesiredPosition();
                 transform.rotation = CalculateDesiredRotation();
@@ -144,13 +147,12 @@ namespace Threshold.UI
 
         private void UpdateLookAhead()
         {
-            // Derive look-ahead from player's velocity or facing direction
-            var rb = target.GetComponent<Rigidbody>();
+            // C5: Use cached Rigidbody instead of per-frame GetComponent
             Vector3 moveDir = Vector3.zero;
 
-            if (rb != null && rb.linearVelocity.sqrMagnitude > 0.1f)
+            if (_cachedRb != null && _cachedRb.linearVelocity.sqrMagnitude > 0.1f)
             {
-                moveDir = rb.linearVelocity.normalized;
+                moveDir = _cachedRb.linearVelocity.normalized;
             }
             else
             {
@@ -177,6 +179,16 @@ namespace Threshold.UI
             _currentLookAhead = Vector3.zero;
             transform.position = CalculateDesiredPosition();
             transform.rotation = CalculateDesiredRotation();
+        }
+
+        /// <summary>
+        /// M8: Sets a new target and recaches its Rigidbody.
+        /// </summary>
+        public void SetTarget(Transform newTarget)
+        {
+            target = newTarget;
+            _cachedRb = newTarget != null ? newTarget.GetComponent<Rigidbody>() : null;
+            if (newTarget != null) SnapToTarget();
         }
 
         /// <summary>

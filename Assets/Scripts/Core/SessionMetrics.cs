@@ -132,11 +132,18 @@ namespace Threshold.Core
         /// </summary>
         public void Save()
         {
-            string filename = $"session_metrics_{mode}_{sessionStartTime.Replace(":", "-")}.json";
-            string path = System.IO.Path.Combine(Application.persistentDataPath, filename);
-            string json = JsonUtility.ToJson(this, true);
-            System.IO.File.WriteAllText(path, json);
-            Debug.Log($"[SessionMetrics] Saved {mode} metrics to {path}");
+            try
+            {
+                string filename = $"session_metrics_{mode}_{sessionStartTime.Replace(":", "-")}.json";
+                string path = System.IO.Path.Combine(Application.persistentDataPath, filename);
+                string json = JsonUtility.ToJson(this, true);
+                System.IO.File.WriteAllText(path, json);
+                Debug.Log($"[SessionMetrics] Saved {mode} metrics to {path}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[SessionMetrics] Save failed: {ex.Message}");
+            }
         }
 
         /// <summary>

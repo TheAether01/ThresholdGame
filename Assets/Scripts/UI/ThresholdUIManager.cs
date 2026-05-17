@@ -275,6 +275,7 @@ namespace Threshold.UI
         private void HandleSummaryContinue()
         {
             IsInSummary = false;
+            SetGameplayUIActive(true);
             Time.timeScale = 1f;
             Debug.Log("[ThresholdUI] Summary dismissed — starting next run.");
         }

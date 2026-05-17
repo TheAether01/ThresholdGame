@@ -83,7 +83,7 @@ namespace Threshold.UI
 
         private void Awake()
         {
-            if (Instance != null && Instance != this) { Destroy(this); return; }
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
         }
 
@@ -253,9 +253,18 @@ namespace Threshold.UI
             // Normalize to 0-1
             InputVector = delta / radius;
 
-            // Apply dead zone
-            if (InputVector.magnitude < deadZone)
+            // M4: Apply dead zone with remapping to avoid sudden jump
+            float mag = InputVector.magnitude;
+            if (mag < deadZone)
+            {
                 InputVector = Vector2.zero;
+            }
+            else
+            {
+                // Remap from [deadZone, 1] to [0, 1]
+                float remapped = (mag - deadZone) / (1f - deadZone);
+                InputVector = InputVector.normalized * remapped;
+            }
 
             // Move knob visual
             _knobRect.anchoredPosition = delta;

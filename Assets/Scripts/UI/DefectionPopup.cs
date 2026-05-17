@@ -204,14 +204,14 @@ namespace Threshold.UI
                 float ease = 1f - Mathf.Pow(1f - t, 3f); // Ease-out cubic
                 _canvasGroup.alpha = ease;
                 _popupRect.anchoredPosition = Vector2.Lerp(startPos, endPos, ease);
-                elapsed += Time.deltaTime;
+                elapsed += Time.unscaledDeltaTime;
                 yield return null;
             }
             _canvasGroup.alpha = 1f;
             _popupRect.anchoredPosition = endPos;
 
-            // Hold
-            yield return new WaitForSeconds(displayDuration);
+            // Hold (M2: use WaitForSecondsRealtime so popup works at timeScale=0)
+            yield return new WaitForSecondsRealtime(displayDuration);
 
             // Fade out
             elapsed = 0f;
@@ -220,7 +220,7 @@ namespace Threshold.UI
                 float t = elapsed / fadeOutDuration;
                 _canvasGroup.alpha = 1f - t;
                 _popupRect.anchoredPosition = new Vector2(-50f * t, 0f);
-                elapsed += Time.deltaTime;
+                elapsed += Time.unscaledDeltaTime;
                 yield return null;
             }
 

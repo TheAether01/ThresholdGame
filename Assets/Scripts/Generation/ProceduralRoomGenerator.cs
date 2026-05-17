@@ -1,0 +1,627 @@
+// ============================================================================
+// ProceduralRoomGenerator.cs — Graph builder with local fallback algorithm
+// THRESHOLD — Google Antigravity Mobile Game Challenge 2026
+// ============================================================================
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Threshold.Core;
+using UnityEngine;
+using Random = UnityEngine.Random;
+
+namespace Threshold.Generation
+{
+    /// <summary>
+    /// Builds a RoomGraphConfig either from Gemini output or via a local
+    /// fallback algorithm. Includes full validation suite.
+    /// </summary>
+    public static class ProceduralRoomGenerator
+    {
+        // ====================================================================
+        // Fallback Generation (no Gemini required)
+        // ====================================================================
+
+        /// <summary>
+        /// Generates a complete, validated RoomGraphConfig using a local algorithm.
+        /// Always produces playable layouts — this is the safety net.
+        /// </summary>
+        public static RoomGraphConfig GenerateFallback(DifficultyProfile difficulty, int seed = -1)
+        {
+            if (seed < 0) seed = Environment.TickCount;
+            Random.InitState(seed);
+
+            int roomCount = Mathf.Clamp(difficulty.targetRoomCount, 5, 12);
+            int gridSize = Mathf.CeilToInt(Mathf.Sqrt(roomCount * 2.5f));
+            gridSize = Mathf.Max(gridSize, 4);
+
+            var config = new RoomGraphConfig
+            {
+                difficulty = difficulty,
+                rooms = new List<RoomConfig>(),
+                edges = new List<EdgeConfig>(),
+                metadata = new LayoutMetadata
+                {
+                    seed = seed,
+                    generationMethod = "local_fallback",
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    gridWidth = gridSize,
+                    gridHeight = gridSize,
+                    qcAttempts = 0
+                }
+            };
+
+            // Grid tracking: which cells are occupied
+            var occupied = new Dictionary<Vector2Int, string>();
+
+            // Step 1: Place ENTRY on bottom border, EXIT on top border
+            Vector2Int entryPos = new(Random.Range(0, gridSize), 0);
+            Vector2Int exitPos = new(Random.Range(0, gridSize), gridSize - 1);
+
+            string entryId = AddRoom(config, occupied, entryPos, RoomRole.ENTRY);
+            string exitId = AddRoom(config, occupied, exitPos, RoomRole.EXIT);
+
+            // Step 2: Generate anchor points between entry and exit
+            var anchors = new List<Vector2Int> { entryPos };
+            int interiorCount = roomCount - 2;
+            int attempts = 0;
+
+            while (interiorCount > 0 && attempts < 200)
+            {
+                attempts++;
+                Vector2Int candidate = new(Random.Range(0, gridSize), Random.Range(0, gridSize));
+                if (!occupied.ContainsKey(candidate))
+                {
+                    string id = AddRoom(config, occupied, candidate, RoomRole.COMBAT);
+                    anchors.Add(candidate);
+                    interiorCount--;
+                }
+            }
+            anchors.Add(exitPos);
+
+            // Step 3: Connect rooms via L-shaped corridor routing
+            // Sort anchors roughly from entry to exit
+            anchors.Sort((a, b) => a.y != b.y ? a.y.CompareTo(b.y) : a.x.CompareTo(b.x));
+
+            for (int i = 0; i < anchors.Count - 1; i++)
+            {
+                ConnectRoomsLShaped(config, occupied, anchors[i], anchors[i + 1], gridSize);
+            }
+
+            // Step 4: Determine shapes from actual doorway connections
+            AssignShapesFromConnections(config);
+
+            // Step 5: Assign gameplay roles
+            AssignRoles(config, difficulty);
+
+            // Step 6: Populate spawn zones based on difficulty
+            PopulateSpawnZones(config, difficulty);
+
+            // Step 7: Add items to PACING and LOOT rooms
+            PopulateItems(config);
+
+            // Validate and fix if needed
+            EnsureConnectivity(config, occupied, gridSize);
+
+            return config;
+        }
+
+        // ====================================================================
+        // Grid Helpers
+        // ====================================================================
+
+        private static string AddRoom(RoomGraphConfig config, Dictionary<Vector2Int, string> occupied,
+                                       Vector2Int pos, RoomRole role)
+        {
+            string id = $"room_{config.rooms.Count}";
+            config.rooms.Add(new RoomConfig
+            {
+                roomId = id,
+                gridCol = pos.x,
+                gridRow = pos.y,
+                role = role,
+                doorways = new List<DoorwayConfig>(),
+                spawnZones = new List<SpawnZoneConfig>(),
+                items = new List<ItemConfig>(),
+                events = new List<EventConfig>()
+            });
+            occupied[pos] = id;
+            return id;
+        }
+
+        private static void ConnectRoomsLShaped(RoomGraphConfig config,
+            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to, int gridSize)
+        {
+            // L-shaped routing: move horizontally first, then vertically
+            Vector2Int current = from;
+
+            // Horizontal leg
+            int dirX = to.x > from.x ? 1 : -1;
+            while (current.x != to.x)
+            {
+                Vector2Int next = new(current.x + dirX, current.y);
+                EnsureRoomAndEdge(config, occupied, current, next, gridSize);
+                current = next;
+            }
+
+            // Vertical leg
+            int dirY = to.y > from.y ? 1 : -1;
+            while (current.y != to.y)
+            {
+                Vector2Int next = new(current.x, current.y + dirY);
+                EnsureRoomAndEdge(config, occupied, current, next, gridSize);
+                current = next;
+            }
+        }
+
+        private static void EnsureRoomAndEdge(RoomGraphConfig config,
+            Dictionary<Vector2Int, string> occupied, Vector2Int from, Vector2Int to, int gridSize)
+        {
+            if (to.x < 0 || to.x >= gridSize || to.y < 0 || to.y >= gridSize) return;
+
+            // Ensure target room exists
+            if (!occupied.ContainsKey(to))
+            {
+                AddRoom(config, occupied, to, RoomRole.COMBAT);
+            }
+
+            string fromId = occupied[from];
+            string toId = occupied[to];
+
+            // Determine direction
+            Direction dir;
+            if (to.y > from.y) dir = Direction.NORTH;
+            else if (to.y < from.y) dir = Direction.SOUTH;
+            else if (to.x > from.x) dir = Direction.EAST;
+            else dir = Direction.WEST;
+
+            // Check if edge already exists
+            bool exists = config.edges.Exists(e =>
+                (e.roomIdA == fromId && e.roomIdB == toId) ||
+                (e.roomIdA == toId && e.roomIdB == fromId));
+
+            if (!exists)
+            {
+                config.edges.Add(new EdgeConfig
+                {
+                    roomIdA = fromId,
+                    roomIdB = toId,
+                    directionFromA = dir
+                });
+
+                // Add doorway configs to both rooms
+                var fromRoom = config.GetRoom(fromId);
+                var toRoom = config.GetRoom(toId);
+                Direction oppositeDir = (Direction)(((int)dir + 2) % 4);
+
+                if (!fromRoom.HasDoorway(dir))
+                {
+                    fromRoom.doorways.Add(new DoorwayConfig
+                    {
+                        direction = dir, isOpen = true, connectedRoomId = toId
+                    });
+                }
+
+                if (!toRoom.HasDoorway(oppositeDir))
+                {
+                    toRoom.doorways.Add(new DoorwayConfig
+                    {
+                        direction = oppositeDir, isOpen = true, connectedRoomId = fromId
+                    });
+                }
+            }
+        }
+
+        // ====================================================================
+        // Shape Assignment
+        // ====================================================================
+
+        private static void AssignShapesFromConnections(RoomGraphConfig config)
+        {
+            foreach (var room in config.rooms)
+            {
+                int doorCount = room.doorways.Count;
+                bool n = room.HasDoorway(Direction.NORTH);
+                bool e = room.HasDoorway(Direction.EAST);
+                bool s = room.HasDoorway(Direction.SOUTH);
+                bool w = room.HasDoorway(Direction.WEST);
+
+                room.shape = doorCount switch
+                {
+                    4 => RoomShape.CROSSROADS,
+                    3 => RoomShape.T_JUNCTION,
+                    2 => AreOpposite(n, e, s, w) ? RoomShape.STRAIGHT : RoomShape.CORNER,
+                    1 => RoomShape.DEAD_END,
+                    _ => RoomShape.DEAD_END
+                };
+            }
+        }
+
+        private static bool AreOpposite(bool n, bool e, bool s, bool w)
+        {
+            return (n && s && !e && !w) || (e && w && !n && !s);
+        }
+
+        // ====================================================================
+        // Role Assignment
+        // ====================================================================
+
+        private static void AssignRoles(RoomGraphConfig config, DifficultyProfile difficulty)
+        {
+            // ENTRY and EXIT are already set. Assign roles to the rest.
+            var interiorRooms = config.rooms.Where(r =>
+                r.role != RoomRole.ENTRY && r.role != RoomRole.EXIT).ToList();
+
+            if (interiorRooms.Count == 0) return;
+
+            // Find room closest to EXIT for BOSS
+            var exitRoom = config.GetExitRoom();
+            if (exitRoom != null)
+            {
+                var connected = config.GetConnectedRoomIds(exitRoom.roomId);
+                foreach (var cid in connected)
+                {
+                    var candidate = interiorRooms.Find(r => r.roomId == cid);
+                    if (candidate != null && candidate.shape == RoomShape.CROSSROADS)
+                    {
+                        candidate.role = RoomRole.BOSS;
+                        interiorRooms.Remove(candidate);
+                        break;
+                    }
+                }
+
+                // If no CROSSROADS found adjacent to exit, use any interior room
+                if (!config.rooms.Exists(r => r.role == RoomRole.BOSS) && interiorRooms.Count > 0)
+                {
+                    var boss = interiorRooms[interiorRooms.Count - 1];
+                    boss.role = RoomRole.BOSS;
+                    interiorRooms.Remove(boss);
+                }
+            }
+
+            // Assign DEAD_ENDs as LOOT
+            foreach (var room in interiorRooms.ToList())
+            {
+                if (room.shape == RoomShape.DEAD_END && room.role == RoomRole.COMBAT)
+                {
+                    room.role = RoomRole.LOOT;
+                }
+            }
+
+            // Place PACING rooms every 2–3 combat rooms
+            int combatStreak = 0;
+            int pacingInterval = difficulty.difficultyMultiplier > 1.5f ? 3 : 2;
+            foreach (var room in interiorRooms)
+            {
+                if (room.role != RoomRole.COMBAT) continue;
+                combatStreak++;
+                if (combatStreak >= pacingInterval)
+                {
+                    room.role = RoomRole.PACING;
+                    combatStreak = 0;
+                }
+            }
+
+            // Assign one AMBUSH if difficulty is high enough
+            if (difficulty.difficultyMultiplier >= 1.2f)
+            {
+                var combatRooms = interiorRooms.Where(r => r.role == RoomRole.COMBAT).ToList();
+                if (combatRooms.Count > 0)
+                {
+                    combatRooms[Random.Range(0, combatRooms.Count)].role = RoomRole.AMBUSH;
+                }
+            }
+
+            // Assign CHOKE to CORNER rooms in combat
+            foreach (var room in interiorRooms)
+            {
+                if (room.role == RoomRole.COMBAT && room.shape == RoomShape.CORNER)
+                {
+                    room.role = RoomRole.CHOKE;
+                    break; // Only one choke per floor
+                }
+            }
+        }
+
+        // ====================================================================
+        // Spawn Zone Population
+        // ====================================================================
+
+        private static void PopulateSpawnZones(RoomGraphConfig config, DifficultyProfile difficulty)
+        {
+            int elitesRemaining = difficulty.eliteCount;
+
+            foreach (var room in config.rooms)
+            {
+                if (room.role == RoomRole.ENTRY || room.role == RoomRole.EXIT ||
+                    room.role == RoomRole.PACING || room.role == RoomRole.LOOT)
+                    continue;
+
+                int baseCount = difficulty.baseEnemiesPerRoom;
+                float mult = difficulty.difficultyMultiplier;
+
+                int enemyCount = room.role switch
+                {
+                    RoomRole.BOSS => Mathf.CeilToInt(baseCount * mult * 1.5f),
+                    RoomRole.AMBUSH => Mathf.CeilToInt(baseCount * mult * 1.2f),
+                    RoomRole.CHOKE => Mathf.Max(2, Mathf.CeilToInt(baseCount * mult * 0.8f)),
+                    _ => Mathf.CeilToInt(baseCount * mult)
+                };
+
+                // Place ELITE in BOSS room first
+                if (room.role == RoomRole.BOSS && elitesRemaining > 0)
+                {
+                    room.spawnZones.Add(new SpawnZoneConfig
+                    {
+                        localPosition = new Vector3(0, 0, 2f),
+                        archetype = NPCArchetype.ELITE,
+                        count = 1,
+                        spawnDelay = 0
+                    });
+                    elitesRemaining--;
+                    enemyCount--;
+                }
+
+                // Fill remaining with mixed archetypes
+                if (enemyCount > 0)
+                {
+                    // Distribute across 2–3 spawn positions
+                    int zones = Mathf.Min(enemyCount, 3);
+                    int perZone = enemyCount / zones;
+                    int remainder = enemyCount % zones;
+
+                    for (int i = 0; i < zones; i++)
+                    {
+                        float angle = (360f / zones) * i * Mathf.Deg2Rad;
+                        Vector3 pos = new(Mathf.Cos(angle) * 4f, 0, Mathf.Sin(angle) * 4f);
+
+                        NPCArchetype archetype = PickArchetype(difficulty, room.role);
+
+                        room.spawnZones.Add(new SpawnZoneConfig
+                        {
+                            localPosition = pos,
+                            archetype = archetype,
+                            count = perZone + (i < remainder ? 1 : 0),
+                            spawnDelay = room.role == RoomRole.AMBUSH ? 1.5f : 0f
+                        });
+                    }
+                }
+            }
+        }
+
+        private static NPCArchetype PickArchetype(DifficultyProfile difficulty, RoomRole role)
+        {
+            float roll = Random.value;
+            float mult = difficulty.difficultyMultiplier;
+
+            if (role == RoomRole.CHOKE) return NPCArchetype.SUPPRESSOR;
+
+            if (mult > 1.5f && roll < 0.25f) return NPCArchetype.FLANKER;
+            if (mult > 1.2f && roll < 0.15f) return NPCArchetype.SUPPRESSOR;
+
+            return NPCArchetype.GRUNT;
+        }
+
+        // ====================================================================
+        // Item Population
+        // ====================================================================
+
+        private static void PopulateItems(RoomGraphConfig config)
+        {
+            foreach (var room in config.rooms)
+            {
+                switch (room.role)
+                {
+                    case RoomRole.PACING:
+                        room.items.Add(new ItemConfig
+                        {
+                            itemType = ItemType.HEALTH_KIT,
+                            localPosition = new Vector3(-2f, 0, 0)
+                        });
+                        room.items.Add(new ItemConfig
+                        {
+                            itemType = ItemType.AMMO_CACHE,
+                            localPosition = new Vector3(2f, 0, 0)
+                        });
+                        break;
+
+                    case RoomRole.LOOT:
+                        room.items.Add(new ItemConfig
+                        {
+                            itemType = Random.value > 0.5f ? ItemType.WEAPON_PICKUP : ItemType.SHIELD_BOOST,
+                            localPosition = Vector3.zero
+                        });
+                        // 30% chance of trap in loot room
+                        if (Random.value < 0.3f)
+                        {
+                            room.items.Add(new ItemConfig
+                            {
+                                itemType = ItemType.TRAP,
+                                localPosition = new Vector3(0, 0, -1f)
+                            });
+                        }
+                        break;
+
+                    case RoomRole.BOSS:
+                        // Reward after boss
+                        room.events.Add(new EventConfig
+                        {
+                            triggerType = EventTriggerType.ON_CLEAR,
+                            description = "Boss defeated — drop reward cache",
+                            parameter = 0
+                        });
+                        break;
+                }
+            }
+        }
+
+        // ====================================================================
+        // Validation
+        // ====================================================================
+
+        /// <summary>
+        /// Validates a RoomGraphConfig for playability. Returns a list of
+        /// issues found. Empty list = valid layout.
+        /// </summary>
+        public static List<string> Validate(RoomGraphConfig config)
+        {
+            var issues = new List<string>();
+            if (config == null || config.rooms == null || config.rooms.Count == 0)
+            {
+                issues.Add("Config is null or has no rooms.");
+                return issues;
+            }
+
+            ValidateConnectivity(config, issues);
+            ValidateSpawnSafety(config, issues);
+            ValidateDoorwayConsistency(config, issues);
+            ValidateRoleConstraints(config, issues);
+            ValidateUniqueRoles(config, issues);
+
+            return issues;
+        }
+
+        /// <summary>BFS connectivity check — all rooms must be reachable from ENTRY.</summary>
+        private static void ValidateConnectivity(RoomGraphConfig config, List<string> issues)
+        {
+            var entry = config.GetEntryRoom();
+            if (entry == null)
+            {
+                issues.Add("No ENTRY room found.");
+                return;
+            }
+
+            var visited = new HashSet<string>();
+            var queue = new Queue<string>();
+            queue.Enqueue(entry.roomId);
+            visited.Add(entry.roomId);
+
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                foreach (string neighbor in config.GetConnectedRoomIds(current))
+                {
+                    if (visited.Add(neighbor))
+                        queue.Enqueue(neighbor);
+                }
+            }
+
+            foreach (var room in config.rooms)
+            {
+                if (!visited.Contains(room.roomId))
+                    issues.Add($"Room {room.roomId} is unreachable from ENTRY.");
+            }
+        }
+
+        /// <summary>No enemies should spawn in the ENTRY room.</summary>
+        private static void ValidateSpawnSafety(RoomGraphConfig config, List<string> issues)
+        {
+            var entry = config.GetEntryRoom();
+            if (entry != null && entry.TotalEnemyCount() > 0)
+                issues.Add("ENTRY room has enemy spawns — must be safe.");
+
+            var exit = config.GetExitRoom();
+            if (exit != null && exit.TotalEnemyCount() > 0)
+                issues.Add("EXIT room has enemy spawns — should be safe.");
+        }
+
+        /// <summary>Connected rooms must have matching doorways facing each other.</summary>
+        private static void ValidateDoorwayConsistency(RoomGraphConfig config, List<string> issues)
+        {
+            foreach (var edge in config.edges)
+            {
+                var roomA = config.GetRoom(edge.roomIdA);
+                var roomB = config.GetRoom(edge.roomIdB);
+                if (roomA == null || roomB == null) continue;
+
+                Direction dirFromA = edge.directionFromA;
+                Direction dirFromB = (Direction)(((int)dirFromA + 2) % 4);
+
+                if (!roomA.HasDoorway(dirFromA))
+                    issues.Add($"Room {edge.roomIdA} missing {dirFromA} doorway to {edge.roomIdB}.");
+                if (!roomB.HasDoorway(dirFromB))
+                    issues.Add($"Room {edge.roomIdB} missing {dirFromB} doorway to {edge.roomIdA}.");
+            }
+        }
+
+        /// <summary>Enforces role-to-shape constraints from GDD.</summary>
+        private static void ValidateRoleConstraints(RoomGraphConfig config, List<string> issues)
+        {
+            foreach (var room in config.rooms)
+            {
+                // BOSS should prefer CROSSROADS (warning, not error)
+                if (room.role == RoomRole.BOSS && room.shape != RoomShape.CROSSROADS)
+                    issues.Add($"Warning: BOSS room {room.roomId} is {room.shape}, CROSSROADS preferred.");
+            }
+        }
+
+        /// <summary>Exactly one ENTRY and one EXIT per floor.</summary>
+        private static void ValidateUniqueRoles(RoomGraphConfig config, List<string> issues)
+        {
+            int entries = config.rooms.Count(r => r.role == RoomRole.ENTRY);
+            int exits = config.rooms.Count(r => r.role == RoomRole.EXIT);
+
+            if (entries != 1) issues.Add($"Expected exactly 1 ENTRY, found {entries}.");
+            if (exits != 1) issues.Add($"Expected exactly 1 EXIT, found {exits}.");
+        }
+
+        /// <summary>Emergency fix: ensure graph is connected by adding corridor rooms.</summary>
+        private static void EnsureConnectivity(RoomGraphConfig config,
+            Dictionary<Vector2Int, string> occupied, int gridSize)
+        {
+            var entry = config.GetEntryRoom();
+            if (entry == null) return;
+
+            var visited = new HashSet<string>();
+            var queue = new Queue<string>();
+            queue.Enqueue(entry.roomId);
+            visited.Add(entry.roomId);
+
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                foreach (string neighbor in config.GetConnectedRoomIds(current))
+                {
+                    if (visited.Add(neighbor))
+                        queue.Enqueue(neighbor);
+                }
+            }
+
+            // Connect any orphaned rooms to the nearest visited room
+            foreach (var room in config.rooms.ToList())
+            {
+                if (visited.Contains(room.roomId)) continue;
+
+                Vector2Int orphanPos = new(room.gridCol, room.gridRow);
+                Vector2Int nearest = FindNearestVisitedCell(orphanPos, visited, config);
+
+                if (nearest.x >= 0)
+                {
+                    ConnectRoomsLShaped(config, occupied, nearest, orphanPos, gridSize);
+                    AssignShapesFromConnections(config);
+                    visited.Add(room.roomId);
+                }
+            }
+        }
+
+        private static Vector2Int FindNearestVisitedCell(Vector2Int from,
+            HashSet<string> visited, RoomGraphConfig config)
+        {
+            float bestDist = float.MaxValue;
+            Vector2Int best = new(-1, -1);
+
+            foreach (var room in config.rooms)
+            {
+                if (!visited.Contains(room.roomId)) continue;
+                Vector2Int pos = new(room.gridCol, room.gridRow);
+                float dist = Vector2Int.Distance(from, pos);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = pos;
+                }
+            }
+            return best;
+        }
+    }
+}

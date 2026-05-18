@@ -62,29 +62,30 @@ namespace Threshold.NPC
         public float accuracy;       // 0–1
         public float moveSpeed;      // NavMesh speed
         public float retreatHealth;  // health % to suggest retreat
+        public float damage;         // per-shot damage to player
 
         public static NPCArchetypeStats Grunt => new()
         {
             maxHealth = 100f, fireRate = 1.0f, accuracy = 0.40f,
-            moveSpeed = 3.5f, retreatHealth = 0.15f
+            moveSpeed = 3.5f, retreatHealth = 0.15f, damage = 8f
         };
 
         public static NPCArchetypeStats Flanker => new()
         {
             maxHealth = 80f, fireRate = 1.2f, accuracy = 0.50f,
-            moveSpeed = 5.0f, retreatHealth = 0.20f
+            moveSpeed = 5.0f, retreatHealth = 0.20f, damage = 10f
         };
 
         public static NPCArchetypeStats Suppressor => new()
         {
             maxHealth = 120f, fireRate = 2.0f, accuracy = 0.25f,
-            moveSpeed = 2.5f, retreatHealth = 0.15f
+            moveSpeed = 2.5f, retreatHealth = 0.15f, damage = 5f
         };
 
         public static NPCArchetypeStats Elite => new()
         {
             maxHealth = 250f, fireRate = 1.5f, accuracy = 0.60f,
-            moveSpeed = 3.5f, retreatHealth = 0.10f
+            moveSpeed = 3.5f, retreatHealth = 0.10f, damage = 15f
         };
 
         public static NPCArchetypeStats Get(NPCArchetype type) => type switch
@@ -511,8 +512,12 @@ namespace Threshold.NPC
 
             if (Physics.Raycast(origin, dir.normalized, out RaycastHit hitInfo, engagementRange))
             {
-                // TODO: Apply damage via health system
-                // hitInfo.collider.GetComponent<IDamageable>()?.TakeDamage(damage);
+                // Apply damage to player via PlayerHealth
+                var playerHealth = hitInfo.collider.GetComponent<Threshold.Player.PlayerHealth>();
+                if (playerHealth != null)
+                {
+                    playerHealth.TakeDamage(Stats.damage);
+                }
             }
         }
 

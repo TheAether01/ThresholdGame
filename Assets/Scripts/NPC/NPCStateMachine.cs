@@ -29,7 +29,8 @@ namespace Threshold.NPC
         FLANK,
         SUPPRESS,
         RETREAT,
-        ALLIED
+        ALLIED,
+        DEAD
     }
 
     /// <summary>
@@ -694,7 +695,15 @@ namespace Threshold.NPC
         {
             _agent.isStopped = true;
             _agent.enabled = false;
-            // TODO: Play death animation, disable collider, schedule cleanup
+
+            // Disable collider so raycasts pass through dead NPCs
+            var col = GetComponent<Collider>();
+            if (col != null) col.enabled = false;
+
+            // Stop the state machine tick
+            SetState(NPCState.DEAD);
+
+            // TODO: Play death animation, schedule cleanup/despawn
         }
 
         // ====================================================================

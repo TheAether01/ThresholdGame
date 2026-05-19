@@ -230,9 +230,22 @@ namespace Threshold.Core
             if (brainController != null)
                 brainController.OnRunStart();
 
+            // Step 8: Start metrics tracking for this run
+            PlayerMetricsTracker.Instance?.OnRunStart();
+
             // Start playing
             Phase = GamePhase.Playing;
             _killedNPCCount = 0;
+
+            // Step 9: Enter the first room in metrics tracking
+            var entryRoomConfig = _currentConfig?.rooms?.Find(r => r.role == RoomRole.ENTRY);
+            if (entryRoomConfig != null)
+            {
+                PlayerMetricsTracker.Instance?.OnRoomEnter(
+                    entryRoomConfig.id,
+                    entryRoomConfig.role,
+                    _playerHealth != null ? _playerHealth.HealthPercent : 1f);
+            }
 
             float difficulty = baseDifficulty + (CompletedRuns * difficultyPerRun);
             Log($"═══ RUN {CurrentRun} ACTIVE — {_totalNPCCount} NPCs, " +

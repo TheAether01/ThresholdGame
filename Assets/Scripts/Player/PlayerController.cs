@@ -245,12 +245,14 @@ namespace Threshold.Player
             );
         }
 
+        private float _nextBroadcastTime;
+
         private void Update()
         {
-            // Broadcast player state to NPC Brain controller periodically
-            // (every 0.5s to avoid unnecessary overhead)
-            if (Time.frameCount % 30 == 0)
+            // Broadcast player state to NPC Brain controller every 0.5s
+            if (Time.time >= _nextBroadcastTime)
             {
+                _nextBroadcastTime = Time.time + 0.5f;
                 BroadcastStateToNPCBrain();
             }
         }

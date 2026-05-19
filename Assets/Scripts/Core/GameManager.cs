@@ -12,6 +12,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Threshold.Agents;
 using Threshold.Generation;
 using Threshold.NPC;
 using Threshold.Player;
@@ -41,6 +42,9 @@ namespace Threshold.Core
 
         [Tooltip("NavMeshSurface for runtime baking. Auto-created if null.")]
         [SerializeField] private NavMeshSurface navMeshSurface;
+
+        [Tooltip("LevelGenerationPipeline for AI-driven level gen (auto-found if null).")]
+        [SerializeField] private LevelGenerationPipeline levelPipeline;
 
         [Header("Generation")]
         [Tooltip("Number of rooms to generate per run.")]
@@ -108,6 +112,14 @@ namespace Threshold.Core
         private Text _overlayTitle;
         private Text _overlaySub;
 
+        // Room detection for brain controller
+        private string _currentPlayerRoomId;
+        private float _moduleWidth = 10f;
+        private int _killStreak;
+
+        // Director Agent profile (set between runs)
+        private DifficultyProfile _directorProfile;
+
         // ====================================================================
         // Enums
         // ====================================================================
@@ -153,6 +165,9 @@ namespace Threshold.Core
             if (brainController == null)
                 brainController = FindAnyObjectByType<NPCBrainController>();
 
+            if (levelPipeline == null)
+                levelPipeline = FindAnyObjectByType<LevelGenerationPipeline>();
+
             StartCoroutine(StartRunSequence());
         }
 
@@ -162,6 +177,12 @@ namespace Threshold.Core
 
             // Track NPC deaths each frame
             CheckNPCStatus();
+
+            // Detect room transitions for brain controller
+            DetectPlayerRoom();
+
+            // Sync player state to brain controller periodically
+            SyncPlayerStateToBrain();
         }
 
         private void OnDestroy()
@@ -185,9 +206,11 @@ namespace Threshold.Core
             // Brief delay to let Unity settle
             yield return new WaitForSeconds(initialDelay);
 
-            // Step 1: Generate floor
+            // Step 1: Generate floor (pipeline or fallback)
             Log("Generating floor...");
-            if (!GenerateFloor())
+            bool floorReady = false;
+            yield return GenerateFloorCoroutine(result => floorReady = result);
+            if (!floorReady)
             {
                 Log("Floor generation failed!", "ERROR");
                 yield break;
@@ -236,16 +259,26 @@ namespace Threshold.Core
             // Start playing
             Phase = GamePhase.Playing;
             _killedNPCCount = 0;
+            _killStreak = 0;
+            _currentPlayerRoomId = null;
 
-            // Step 9: Enter the first room in metrics tracking
+            // Step 9: Enter the first room in metrics tracking + brain
             var entryRoomConfig = _currentConfig?.rooms?.Find(r => r.role == RoomRole.ENTRY);
             if (entryRoomConfig != null)
             {
                 PlayerMetricsTracker.Instance?.OnRoomEnter(
-                    entryRoomConfig.id,
+                    entryRoomConfig.roomId,
                     entryRoomConfig.role,
                     _playerHealth != null ? _playerHealth.HealthPercent : 1f);
+
+                // CRITICAL FIX: Enter the first room in brain controller too
+                EnterBrainRoom(entryRoomConfig.roomId);
+                _currentPlayerRoomId = entryRoomConfig.roomId; // Prevent double-entry from Update
             }
+
+            // Subscribe to weapon kills for brain state updates
+            if (_playerWeapon != null)
+                _playerWeapon.OnKill += HandleNPCKilledByPlayer;
 
             float difficulty = baseDifficulty + (CompletedRuns * difficultyPerRun);
             Log($"═══ RUN {CurrentRun} ACTIVE — {_totalNPCCount} NPCs, " +
@@ -256,20 +289,79 @@ namespace Threshold.Core
         // Floor Generation
         // ====================================================================
 
-        private bool GenerateFloor()
+        /// <summary>
+        /// Coroutine that tries the full AI pipeline (Director→LevelGen→QC→Build),
+        /// then falls back to local procedural generation if pipeline is unavailable.
+        /// </summary>
+        private IEnumerator GenerateFloorCoroutine(System.Action<bool> callback)
+        {
+            // ── PATH A: Full AI Pipeline (all 5 agents) ──
+            if (levelPipeline != null && GeminiAgentBridge.Instance != null &&
+                GeminiAgentBridge.Instance.IsConfigured)
+            {
+                Log("Using AI Pipeline (Director→LevelGen→QC→Build)...");
+
+                var task = levelPipeline.StartNewRun();
+                while (!task.IsCompleted)
+                    yield return null;
+
+                if (!task.IsFaulted && task.Result != null && task.Result.success)
+                {
+                    var pResult = task.Result;
+                    _currentConfig = pResult.config;
+                    _directorProfile = pResult.difficulty;
+
+                    Log($"AI Pipeline complete in {pResult.totalPipelineTimeMs:F0}ms — " +
+                        $"{pResult.config.rooms.Count} rooms, source={pResult.generationSource}, " +
+                        $"QC attempts={pResult.qcAttempts}");
+
+                    if (!string.IsNullOrEmpty(pResult.directorDecisionText))
+                        Log($"Director says: \"{pResult.directorDecisionText}\"");
+
+                    callback?.Invoke(true);
+                    yield break;
+                }
+
+                // Pipeline failed — fall through to local fallback
+                string error = task.IsFaulted
+                    ? task.Exception?.InnerException?.Message ?? "Unknown"
+                    : "Pipeline returned null or unsuccessful result";
+                Log($"AI Pipeline failed: {error}. Falling back to local generation.");
+            }
+
+            // ── PATH B: Local Procedural Fallback ──
+            callback?.Invoke(GenerateFloorLocal());
+        }
+
+        /// <summary>
+        /// Synchronous local floor generation using ProceduralRoomGenerator.
+        /// Used as fallback when the AI pipeline is unavailable.
+        /// </summary>
+        private bool GenerateFloorLocal()
         {
             int seed = System.Environment.TickCount;
             float difficulty = baseDifficulty + (CompletedRuns * difficultyPerRun);
 
-            var diffProfile = new DifficultyProfile
+            // Use Director Agent profile if available, otherwise fall back to defaults
+            DifficultyProfile diffProfile;
+            if (_directorProfile != null)
             {
-                difficultyMultiplier = difficulty,
-                targetRoomCount = targetRoomCount,
-                baseEnemiesPerRoom = baseEnemiesPerRoom,
-                eliteCount = eliteCount,
-                eventProbability = 0.3f,
-                preferredTactic = "ATTACK"
-            };
+                diffProfile = _directorProfile;
+                Log($"Using Director profile: {diffProfile.difficultyMultiplier:F1}x, " +
+                    $"{diffProfile.targetRoomCount} rooms, {diffProfile.baseEnemiesPerRoom} enemies/room");
+            }
+            else
+            {
+                diffProfile = new DifficultyProfile
+                {
+                    difficultyMultiplier = difficulty,
+                    targetRoomCount = targetRoomCount,
+                    baseEnemiesPerRoom = baseEnemiesPerRoom,
+                    eliteCount = eliteCount,
+                    eventProbability = 0.3f,
+                    preferredTactic = "ATTACK"
+                };
+            }
 
             _currentConfig = ProceduralRoomGenerator.GenerateFallback(diffProfile, seed);
             if (_currentConfig == null || _currentConfig.rooms.Count == 0)
@@ -278,7 +370,7 @@ namespace Threshold.Core
                 return false;
             }
 
-            Log($"Config: {_currentConfig.rooms.Count} rooms, " +
+            Log($"Local gen: {_currentConfig.rooms.Count} rooms, " +
                 $"{_currentConfig.edges.Count} edges, seed={seed}");
 
             bool success = floorGenerator.BuildFloor(_currentConfig);
@@ -417,6 +509,88 @@ namespace Threshold.Core
         }
 
         // ====================================================================
+        // Room Detection (drives NPC Brain Controller)
+        // ====================================================================
+
+        private void DetectPlayerRoom()
+        {
+            if (_currentConfig == null || _playerTransform == null) return;
+            if (brainController == null) return;
+
+            int col = Mathf.RoundToInt(_playerTransform.position.x / _moduleWidth);
+            int row = Mathf.RoundToInt(_playerTransform.position.z / _moduleWidth);
+
+            var room = _currentConfig.rooms.Find(r => r.gridCol == col && r.gridRow == row);
+            if (room == null) return;
+
+            if (room.roomId != _currentPlayerRoomId)
+            {
+                string oldRoom = _currentPlayerRoomId;
+                _currentPlayerRoomId = room.roomId;
+
+                Log($"Player entered room: {room.roomId} ({room.role})");
+
+                // Exit previous room in brain
+                if (!string.IsNullOrEmpty(oldRoom))
+                    brainController.OnRoomExit();
+
+                // Enter new room with its NPCs
+                EnterBrainRoom(room.roomId);
+
+                // Update camera room framing
+                var camera = UI.TopDownCamera.Instance;
+                if (camera != null)
+                    camera.OnRoomEnterByGrid(room.gridCol, room.gridRow);
+
+                // Update metrics tracker
+                PlayerMetricsTracker.Instance?.OnRoomEnter(
+                    room.roomId, room.role,
+                    _playerHealth != null ? _playerHealth.HealthPercent : 1f);
+            }
+        }
+
+        private void EnterBrainRoom(string roomId)
+        {
+            if (brainController == null || _playerTransform == null) return;
+
+            if (_roomNPCs.TryGetValue(roomId, out var npcsInRoom))
+            {
+                var living = npcsInRoom.Where(n => n != null && !n.IsDead).ToList();
+                brainController.OnRoomEnter(roomId, living, _playerTransform);
+                brainController.UpdatePlayerState(
+                    _playerHealth != null ? _playerHealth.HealthPercent : 1f,
+                    50f, // Default accuracy — updated by SyncPlayerStateToBrain
+                    _killStreak
+                );
+                Log($"Brain Controller: {living.Count} NPCs registered for room {roomId}.");
+            }
+        }
+
+        private void SyncPlayerStateToBrain()
+        {
+            if (brainController == null || _playerHealth == null) return;
+
+            brainController.UpdatePlayerState(
+                _playerHealth.HealthPercent,
+                50f, // PlayerMetricsTracker provides real accuracy when available
+                _killStreak
+            );
+        }
+
+        private void HandleNPCKilledByPlayer(Transform npcTransform)
+        {
+            _killStreak++;
+
+            // Notify brain controller of the kill
+            if (npcTransform != null)
+            {
+                var npc = npcTransform.GetComponent<NPCStateMachine>();
+                if (npc != null)
+                    brainController?.OnNPCDeath(npc);
+            }
+        }
+
+        // ====================================================================
         // Win / Death Handlers
         // ====================================================================
 
@@ -430,6 +604,9 @@ namespace Threshold.Core
 
             // Report to metrics
             PlayerMetricsTracker.Instance?.OnRunEnd(true);
+
+            // Evaluate rewards via Reward Agent
+            EvaluateRunReward();
 
             // Show overlay
             ShowOverlay("LEVEL CLEARED", "Generating next floor...",
@@ -447,6 +624,9 @@ namespace Threshold.Core
 
             // Report to metrics
             PlayerMetricsTracker.Instance?.OnRunEnd(false);
+
+            // Evaluate rewards via Reward Agent
+            EvaluateRunReward();
 
             // Show overlay
             ShowOverlay("ELIMINATED", "Restarting...",
@@ -485,6 +665,10 @@ namespace Threshold.Core
             Log("Cleaning up previous run...");
             UnsubscribeFromPlayer();
 
+            // Unsubscribe from weapon kills
+            if (_playerWeapon != null)
+                _playerWeapon.OnKill -= HandleNPCKilledByPlayer;
+
             if (brainController != null)
                 brainController.OnRoomExit();
 
@@ -496,6 +680,8 @@ namespace Threshold.Core
             _allNPCs.Clear();
             _roomNPCs.Clear();
             _subscribedToPlayerDeath = false;
+            _currentPlayerRoomId = null;
+            _killStreak = 0;
             _playerTransform = null;
             _playerHealth = null;
             _playerWeapon = null;
@@ -503,7 +689,7 @@ namespace Threshold.Core
             // Fade out overlay
             yield return new WaitForSecondsRealtime(0.3f);
 
-            // Start new run
+            // Start new run (pipeline handles Director→LevelGen→QC internally)
             StartCoroutine(StartRunSequence());
 
             // Fade out overlay after new run starts
@@ -518,6 +704,40 @@ namespace Threshold.Core
                     yield return null;
                 }
                 _overlayCanvas.gameObject.SetActive(false);
+            }
+        }
+        // ====================================================================
+        // Agent Integration — Reward
+        // ====================================================================
+
+        /// <summary>
+        /// Fire-and-forget Reward Agent evaluation. Called at run end
+        /// (both win and death) to grant XP and check unlocks.
+        /// </summary>
+        private async void EvaluateRunReward()
+        {
+            if (RewardManager.Instance == null)
+            {
+                Log("Reward Agent skipped — RewardManager not found.");
+                return;
+            }
+
+            try
+            {
+                float difficulty = _directorProfile?.difficultyMultiplier
+                                ?? (baseDifficulty + (CompletedRuns * difficultyPerRun));
+                var result = await RewardManager.Instance.EvaluateRunReward(difficulty);
+
+                if (result != null)
+                {
+                    Log($"Reward: +{result.totalXP} XP (source: {result.source}). " +
+                        $"Total: {RewardManager.Instance.Progression.totalXP} XP, " +
+                        $"Level {RewardManager.Instance.GetLevel()}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log($"Reward Agent error: {ex.Message}. XP not awarded.");
             }
         }
 

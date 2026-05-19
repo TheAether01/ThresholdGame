@@ -13,9 +13,9 @@ GameObject:
   - component: {fileID: 7877185363906269937}
   - component: {fileID: 4248422969572983486}
   - component: {fileID: 7144929982871992569}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: MockPlayer
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0

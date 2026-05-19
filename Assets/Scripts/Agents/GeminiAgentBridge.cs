@@ -1,6 +1,9 @@
 // ============================================================================
-// GeminiAgentBridge.cs — Singleton communication layer for all 5 Gemini agents
+// GeminiAgentBridge.cs — Singleton communication layer for all 5 AI agents
 // THRESHOLD — Google Antigravity Mobile Game Challenge 2026
+//
+// Supports multiple LLM providers: Gemini (Google) and Groq (OpenAI-compatible).
+// Toggle the provider via the Inspector dropdown — no code changes needed.
 //
 // Usage:
 //   var response = await GeminiAgentBridge.Instance.SendAgentRequest(request);
@@ -24,9 +27,9 @@ using Debug = UnityEngine.Debug;
 namespace Threshold.Agents
 {
     /// <summary>
-    /// MonoBehaviour singleton that handles all Gemini API communication.
+    /// MonoBehaviour singleton that handles all LLM API communication.
+    /// Supports Gemini and Groq providers — select via Inspector dropdown.
     /// Attach to a persistent GameObject in the scene.
-    /// API key is read from environment variable GEMINI_API_KEY or set via Inspector.
     /// </summary>
     public class GeminiAgentBridge : MonoBehaviour
     {
@@ -53,22 +56,46 @@ namespace Threshold.Agents
         // Configuration (Inspector)
         // ====================================================================
 
-        [Header("API Configuration")]
+        [Header("═══ LLM Provider ═══")]
+        [Tooltip("Select which LLM provider to use for all agent calls.")]
+        [SerializeField] private LLMProvider activeProvider = LLMProvider.Gemini;
+
+        /// <summary>Which provider is currently active (read-only for external code).</summary>
+        public LLMProvider ActiveProvider => activeProvider;
+
+        [Header("═══ Gemini Configuration ═══")]
         [Tooltip("Gemini API key. If empty, reads from GEMINI_API_KEY environment variable.")]
         [SerializeField] private string apiKey = "";
 
         [Tooltip("Base URL for the Gemini API (v1beta endpoint).")]
         [SerializeField] private string apiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/models";
 
-        [Header("Model Identifiers")]
         [SerializeField] private string flashModelId = "gemini-2.0-flash";
         [SerializeField] private string proModelId = "gemini-2.0-pro";
 
-        [Header("Generation Defaults")]
+        [Header("═══ Groq Configuration ═══")]
+        [Tooltip("Groq API key. If empty, reads from GROQ_API_KEY environment variable.")]
+        [SerializeField] private string groqApiKey = "";
+
+        [Tooltip("Base URL for the Groq API.")]
+        [SerializeField] private string groqApiBaseUrl = "https://api.groq.com/openai/v1/chat/completions";
+
+        [Tooltip("Groq model for Flash-tier calls (fast, low-latency).")]
+        [SerializeField] private string groqFlashModelId = "llama-3.1-8b-instant";
+        [Tooltip("Groq model for Pro-tier calls (higher reasoning).")]
+        [SerializeField] private string groqProModelId = "llama-3.3-70b-versatile";
+
+        [Header("═══ Groq Rate Limiting ═══")]
+        [Tooltip("Max Groq requests per minute. Free tier: 30 RPM.")]
+        [SerializeField] private int groqRpmLimit = 30;
+        [Tooltip("Max Groq requests per day. Free tier: 14400 RPD.")]
+        [SerializeField] private int groqRpdLimit = 14400;
+
+        [Header("═══ Generation Defaults ═══")]
         [SerializeField] private float defaultTemperature = 0.7f;
         [SerializeField] private int maxOutputTokens = 2048;
 
-        [Header("Rate Limiting (Free Tier Protection)")]
+        [Header("═══ Gemini Rate Limiting ═══")]
         [Tooltip("Max Flash requests per minute. Free tier: 15 RPM.")]
         [SerializeField] private int flashRpmLimit = 15;
         [Tooltip("Max Flash requests per day. Free tier: 1500 RPD.")]
@@ -78,14 +105,14 @@ namespace Threshold.Agents
         [Tooltip("Max Pro requests per day. Free tier: 50 RPD.")]
         [SerializeField] private int proRpdLimit = 50;
 
-        [Header("Development Mode")]
+        [Header("═══ Development Mode ═══")]
         [Tooltip("When enabled, returns mock responses instead of calling the API. Use during development to avoid burning API quota.")]
         [SerializeField] private bool useMockResponses = false;
         [Tooltip("Simulated latency range in ms for mock responses.")]
         [SerializeField] private int mockMinLatencyMs = 200;
         [SerializeField] private int mockMaxLatencyMs = 800;
 
-        [Header("Debug")]
+        [Header("═══ Debug ═══")]
         [SerializeField] private bool logToConsole = true;
         [SerializeField] private int maxStoredTraces = 500;
 
@@ -96,11 +123,15 @@ namespace Threshold.Agents
         private readonly List<AgentTraceEntry> _traceLog = new();
         private readonly Dictionary<string, AgentTraceEntry> _lastTraceByAgent = new();
 
-        // Rate limiting state
+        // Rate limiting state — Gemini
         private readonly List<float> _flashCallTimestamps = new();
         private readonly List<float> _proCallTimestamps = new();
         private int _flashDailyCount;
         private int _proDailyCount;
+        // Rate limiting state — Groq
+        private readonly List<float> _groqCallTimestamps = new();
+        private int _groqDailyCount;
+
         private int _dailyDate; // Day-of-year tracker for daily reset
         private int _rateLimitRejections;
         private int _mockCallsServed;
@@ -209,33 +240,52 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         /// <summary>
-        /// Resolves the API key from Inspector field or environment variable.
+        /// Resolves API keys from Inspector fields or environment variables.
         /// </summary>
         private void ResolveApiKey()
         {
+            // Gemini key
             if (string.IsNullOrWhiteSpace(apiKey))
-            {
                 apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? "";
-            }
 
-            if (string.IsNullOrWhiteSpace(apiKey))
+            // Groq key
+            if (string.IsNullOrWhiteSpace(groqApiKey))
+                groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY") ?? "";
+
+            if (logToConsole)
             {
-                Debug.LogWarning("[GeminiAgentBridge] No API key configured. " +
-                                 "Set via Inspector or GEMINI_API_KEY environment variable.");
-            }
-            else if (logToConsole)
-            {
-                Debug.Log("[GeminiAgentBridge] API key loaded. " +
-                         $"Flash: {flashModelId}, Pro: {proModelId}");
+                string providerLabel = activeProvider.ToString().ToUpper();
+                bool hasKey = activeProvider == LLMProvider.Gemini
+                    ? !string.IsNullOrWhiteSpace(apiKey)
+                    : !string.IsNullOrWhiteSpace(groqApiKey);
+
+                if (hasKey)
+                {
+                    string models = activeProvider == LLMProvider.Gemini
+                        ? $"Flash: {flashModelId}, Pro: {proModelId}"
+                        : $"Flash: {groqFlashModelId}, Pro: {groqProModelId}";
+                    Debug.Log($"[AgentBridge] Provider: {providerLabel} — API key loaded. {models}");
+                }
+                else
+                {
+                    string envVar = activeProvider == LLMProvider.Gemini ? "GEMINI_API_KEY" : "GROQ_API_KEY";
+                    Debug.LogWarning($"[AgentBridge] Provider: {providerLabel} — No API key. " +
+                                     $"Set via Inspector or {envVar} environment variable.");
+                }
             }
         }
+
+        /// <summary>Returns the active API key based on the selected provider.</summary>
+        private string GetActiveApiKey() =>
+            activeProvider == LLMProvider.Gemini ? apiKey : groqApiKey;
 
         // ====================================================================
         // Public API
         // ====================================================================
 
         /// <summary>
-        /// Sends an agent request to the Gemini API asynchronously.
+        /// Sends an agent request to the active LLM provider asynchronously.
+        /// Routes to Gemini or Groq based on the Inspector toggle.
         /// Returns an AgentResponse with the parsed 5-step trace on success,
         /// or a failure response with error details. Never throws.
         /// </summary>
@@ -252,9 +302,11 @@ All 5 fields are mandatory and must be non-empty strings.";
                 return await ServeMockResponse(request);
             }
 
-            if (string.IsNullOrWhiteSpace(apiKey))
+            string activeKey = GetActiveApiKey();
+            if (string.IsNullOrWhiteSpace(activeKey))
             {
-                return AgentResponse.Failure(request.agentName, "No API key configured.");
+                return AgentResponse.Failure(request.agentName,
+                    $"No API key configured for {activeProvider}.");
             }
 
             // --- Rate limit check ---
@@ -268,29 +320,78 @@ All 5 fields are mandatory and must be non-empty strings.";
             }
 
             var stopwatch = Stopwatch.StartNew();
+            string providerTag = activeProvider.ToString().ToUpper();
 
             try
             {
-                // Build the request
-                string modelId = request.model == GeminiModel.Flash ? flashModelId : proModelId;
-                string url = $"{apiBaseUrl}/{modelId}:generateContent?key={apiKey}";
-                string body = BuildRequestBody(request);
+                string url;
+                string body;
+                Dictionary<string, string> headers = new();
+
+                if (activeProvider == LLMProvider.Groq)
+                {
+                    // --- Groq: OpenAI-compatible chat completions ---
+                    url = groqApiBaseUrl;
+                    body = BuildGroqRequestBody(request);
+                    headers["Authorization"] = $"Bearer {groqApiKey}";
+                }
+                else
+                {
+                    // --- Gemini: Google API with key in URL ---
+                    string modelId = request.model == GeminiModel.Flash ? flashModelId : proModelId;
+                    url = $"{apiBaseUrl}/{modelId}:generateContent?key={apiKey}";
+                    body = BuildGeminiRequestBody(request);
+                }
 
                 // Record this call for rate limiting
                 RecordApiCall(request.model);
 
                 if (logToConsole)
                 {
-                    Debug.Log($"[GeminiAgentBridge] → {request.agentName} " +
-                             $"({request.model}) sending request...");
+                    Debug.Log($"[AgentBridge] → {request.agentName} " +
+                             $"({providerTag}/{request.model}) sending request...");
                 }
 
-                // Send HTTP request
-                string responseText = await SendHttpRequest(url, body, request.timeoutSeconds);
+                // Send HTTP request with 429 retry support
+                string responseText = null;
+                int maxRetries = 1;
+                for (int attempt = 0; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        responseText = await SendHttpRequest(url, body, request.timeoutSeconds, headers);
+                        break; // Success — exit retry loop
+                    }
+                    catch (Exception httpEx) when (attempt < maxRetries && httpEx.Message.Contains("HTTP 429"))
+                    {
+                        // Parse retry delay from error message (e.g., "try again in 7.46s")
+                        float retryDelay = 8f; // Default fallback
+                        var retryMatch = System.Text.RegularExpressions.Regex.Match(
+                            httpEx.Message, @"try again in (\d+\.?\d*)s");
+                        if (retryMatch.Success && float.TryParse(retryMatch.Groups[1].Value,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float parsed))
+                        {
+                            retryDelay = parsed + 0.5f; // Add small buffer
+                        }
+
+                        if (logToConsole)
+                        {
+                            Debug.LogWarning($"[AgentBridge] Rate limited (429). " +
+                                           $"Retrying {request.agentName} in {retryDelay:F1}s...");
+                        }
+
+                        // Wait using Task.Delay (non-blocking)
+                        await Task.Delay((int)(retryDelay * 1000));
+                    }
+                }
+
                 stopwatch.Stop();
 
-                // Parse the Gemini API response envelope
-                string content = ExtractContentFromResponse(responseText);
+                // Parse response based on provider
+                string content = activeProvider == LLMProvider.Groq
+                    ? ExtractContentFromGroqResponse(responseText)
+                    : ExtractContentFromGeminiResponse(responseText);
 
                 // Parse and validate the 5-step trace
                 AgentTrace trace = ParseTrace(content);
@@ -313,8 +414,8 @@ All 5 fields are mandatory and must be non-empty strings.";
 
                 if (logToConsole)
                 {
-                    Debug.Log($"[GeminiAgentBridge] ✓ {request.agentName} " +
-                             $"responded in {stopwatch.ElapsedMilliseconds}ms");
+                    Debug.Log($"[AgentBridge] ✓ {request.agentName} " +
+                             $"({providerTag}) responded in {stopwatch.ElapsedMilliseconds}ms");
                 }
 
                 return successResponse;
@@ -339,7 +440,7 @@ All 5 fields are mandatory and must be non-empty strings.";
                     stopwatch.ElapsedMilliseconds
                 );
                 LogTrace(request, response);
-                Debug.LogError($"[GeminiAgentBridge] ✗ {request.agentName} error: {ex.Message}");
+                Debug.LogError($"[AgentBridge] ✗ {request.agentName} ({providerTag}) error: {ex.Message}");
                 return response;
             }
         }
@@ -356,10 +457,10 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         /// <summary>
-        /// Checks whether the API key is configured and non-empty.
+        /// Checks whether the active provider's API key is configured.
         /// In mock mode, always returns true.
         /// </summary>
-        public bool IsConfigured => useMockResponses || !string.IsNullOrWhiteSpace(apiKey);
+        public bool IsConfigured => useMockResponses || !string.IsNullOrWhiteSpace(GetActiveApiKey());
 
         /// <summary>
         /// Returns a human-readable usage report for monitoring quota.
@@ -367,10 +468,18 @@ All 5 fields are mandatory and must be non-empty strings.";
         public string GetUsageReport()
         {
             ResetDailyCountIfNeeded();
+            string mode = useMockResponses ? "MOCK (no API calls)" : $"LIVE ({activeProvider})";
+            string providerStats = activeProvider == LLMProvider.Groq
+                ? $"  Groq: {_groqDailyCount}/{groqRpdLimit} daily, " +
+                  $"{GetRecentCallCount(_groqCallTimestamps)}/{groqRpmLimit} RPM"
+                : $"  Flash: {_flashDailyCount}/{flashRpdLimit} daily, " +
+                  $"{GetRecentCallCount(_flashCallTimestamps)}/{flashRpmLimit} RPM\n" +
+                  $"  Pro:   {_proDailyCount}/{proRpdLimit} daily, " +
+                  $"{GetRecentCallCount(_proCallTimestamps)}/{proRpmLimit} RPM";
+
             return $"[Usage Report]\n" +
-                   $"  Mode: {(useMockResponses ? "MOCK (no API calls)" : "LIVE")}\n" +
-                   $"  Flash: {_flashDailyCount}/{flashRpdLimit} daily, {GetRecentCallCount(_flashCallTimestamps)}/{flashRpmLimit} RPM\n" +
-                   $"  Pro:   {_proDailyCount}/{proRpdLimit} daily, {GetRecentCallCount(_proCallTimestamps)}/{proRpmLimit} RPM\n" +
+                   $"  Mode: {mode}\n" +
+                   $"{providerStats}\n" +
                    $"  Total calls: {TotalCalls} (✓{SuccessfulCalls} ✗{FailedCalls})\n" +
                    $"  Rate limit rejections: {_rateLimitRejections}\n" +
                    $"  Mock calls served: {_mockCallsServed}";
@@ -382,9 +491,11 @@ All 5 fields are mandatory and must be non-empty strings.";
 
         /// <summary>
         /// Sends an HTTP POST request using UnityWebRequest.
-        /// Runs on the main thread but yields asynchronously.
+        /// Accepts optional extra headers (e.g. Authorization for Groq).
         /// </summary>
-        private async Task<string> SendHttpRequest(string url, string jsonBody, int timeoutSeconds)
+        private async Task<string> SendHttpRequest(
+            string url, string jsonBody, int timeoutSeconds,
+            Dictionary<string, string> extraHeaders = null)
         {
             byte[] bodyBytes = Encoding.UTF8.GetBytes(jsonBody);
 
@@ -393,6 +504,13 @@ All 5 fields are mandatory and must be non-empty strings.";
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.timeout = timeoutSeconds;
+
+            // Apply provider-specific headers (e.g. Bearer token for Groq)
+            if (extraHeaders != null)
+            {
+                foreach (var kvp in extraHeaders)
+                    request.SetRequestHeader(kvp.Key, kvp.Value);
+            }
 
             var operation = request.SendWebRequest();
 
@@ -431,14 +549,14 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         // ====================================================================
-        // Internal: Request Building
+        // Internal: Request Building — Gemini
         // ====================================================================
 
         /// <summary>
         /// Builds the Gemini API request body JSON with system prompt,
         /// trace format instruction, and game state.
         /// </summary>
-        private string BuildRequestBody(AgentRequest request)
+        private string BuildGeminiRequestBody(AgentRequest request)
         {
             var apiRequest = new GeminiApiRequest
             {
@@ -475,13 +593,51 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         // ====================================================================
+        // Internal: Request Building — Groq
+        // ====================================================================
+
+        /// <summary>
+        /// Builds the Groq API request body JSON using OpenAI chat completions format.
+        /// System prompt goes in a "system" message, game state in a "user" message.
+        /// </summary>
+        private string BuildGroqRequestBody(AgentRequest request)
+        {
+            string modelId = request.model == GeminiModel.Flash
+                ? groqFlashModelId
+                : groqProModelId;
+
+            var apiRequest = new GroqApiRequest
+            {
+                model = modelId,
+                messages = new[]
+                {
+                    new GroqMessage
+                    {
+                        role = "system",
+                        content = request.systemPrompt + TraceFormatInstruction
+                    },
+                    new GroqMessage
+                    {
+                        role = "user",
+                        content = $"Current game state:\n{request.gameStateJson}"
+                    }
+                },
+                temperature = defaultTemperature,
+                max_tokens = maxOutputTokens,
+                response_format = new GroqResponseFormat { type = "json_object" }
+            };
+
+            return JsonUtility.ToJson(apiRequest);
+        }
+
+        // ====================================================================
         // Internal: Response Parsing
         // ====================================================================
 
         /// <summary>
         /// Extracts the text content from a Gemini API response envelope.
         /// </summary>
-        private string ExtractContentFromResponse(string responseJson)
+        private string ExtractContentFromGeminiResponse(string responseJson)
         {
             if (string.IsNullOrWhiteSpace(responseJson))
             {
@@ -511,6 +667,38 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         /// <summary>
+        /// Extracts the text content from a Groq API response envelope.
+        /// </summary>
+        private string ExtractContentFromGroqResponse(string responseJson)
+        {
+            if (string.IsNullOrWhiteSpace(responseJson))
+            {
+                throw new Exception("Empty response from Groq API.");
+            }
+
+            var apiResponse = JsonUtility.FromJson<GroqApiResponse>(responseJson);
+
+            if (apiResponse.error != null && !string.IsNullOrEmpty(apiResponse.error.message))
+            {
+                throw new Exception($"Groq API error ({apiResponse.error.type}): " +
+                                   $"{apiResponse.error.message}");
+            }
+
+            if (apiResponse.choices == null || apiResponse.choices.Length == 0)
+            {
+                throw new Exception("Groq API returned no choices.");
+            }
+
+            var message = apiResponse.choices[0]?.message;
+            if (message == null || string.IsNullOrEmpty(message.content))
+            {
+                throw new Exception("Groq API choice has no message content.");
+            }
+
+            return message.content;
+        }
+
+        /// <summary>
         /// Parses the 5-step trace from the response text.
         /// Handles both clean JSON and JSON embedded in markdown fences.
         /// </summary>
@@ -532,9 +720,46 @@ All 5 fields are mandatory and must be non-empty strings.";
                 cleaned = cleaned.Trim();
             }
 
+            // Attempt 1: Standard JsonUtility parse
             try
             {
-                return JsonUtility.FromJson<AgentTrace>(cleaned);
+                var trace = JsonUtility.FromJson<AgentTrace>(cleaned);
+                if (trace != null && trace.IsValid())
+                    return trace;
+            }
+            catch
+            {
+                // Fall through to manual extraction
+            }
+
+            // Attempt 2: Manual regex extraction — handles nested JSON objects,
+            // different field names, and partial responses from smaller LLMs
+            try
+            {
+                var trace = new AgentTrace();
+                trace.observation = ExtractJsonStringField(cleaned, "observation");
+                trace.inference = ExtractJsonStringField(cleaned, "inference");
+                trace.decision = ExtractJsonStringField(cleaned, "decision");
+                trace.evaluation_plan = ExtractJsonStringField(cleaned, "evaluation_plan")
+                                     ?? ExtractJsonStringField(cleaned, "evaluation");
+
+                // The 'action' field is special — LLMs often return it as a nested
+                // JSON object instead of a string. Handle both cases.
+                trace.action = ExtractJsonStringField(cleaned, "action")
+                            ?? ExtractJsonObjectField(cleaned, "action");
+
+                if (logToConsole && !trace.IsValid())
+                {
+                    var missing = new System.Collections.Generic.List<string>();
+                    if (string.IsNullOrWhiteSpace(trace.observation)) missing.Add("observation");
+                    if (string.IsNullOrWhiteSpace(trace.inference)) missing.Add("inference");
+                    if (string.IsNullOrWhiteSpace(trace.decision)) missing.Add("decision");
+                    if (string.IsNullOrWhiteSpace(trace.action)) missing.Add("action");
+                    if (string.IsNullOrWhiteSpace(trace.evaluation_plan)) missing.Add("evaluation_plan");
+                    Debug.LogWarning($"[GeminiAgentBridge] Trace missing fields: [{string.Join(", ", missing)}]");
+                }
+
+                return trace;
             }
             catch (Exception ex)
             {
@@ -548,16 +773,82 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         /// <summary>
+        /// Extracts a JSON string field value using regex.
+        /// Matches: "fieldName": "value with \"escapes\""
+        /// </summary>
+        private string ExtractJsonStringField(string json, string fieldName)
+        {
+            // Match "fieldName" : "value" (handles escaped quotes inside)
+            var pattern = $"\"{fieldName}\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"";
+            var match = System.Text.RegularExpressions.Regex.Match(json, pattern,
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            return match.Success ? match.Groups[1].Value
+                .Replace("\\\"", "\"")
+                .Replace("\\n", "\n")
+                .Replace("\\\\", "\\")
+                : null;
+        }
+
+        /// <summary>
+        /// Extracts a JSON object/array field value and returns it as a string.
+        /// Matches: "fieldName": { ... } or "fieldName": [ ... ]
+        /// Uses brace/bracket counting for proper nesting.
+        /// </summary>
+        private string ExtractJsonObjectField(string json, string fieldName)
+        {
+            var pattern = $"\"{fieldName}\"\\s*:\\s*";
+            var match = System.Text.RegularExpressions.Regex.Match(json, pattern);
+            if (!match.Success) return null;
+
+            int startIdx = match.Index + match.Length;
+            if (startIdx >= json.Length) return null;
+
+            char opener = json[startIdx];
+            if (opener != '{' && opener != '[') return null;
+
+            char closer = opener == '{' ? '}' : ']';
+            int depth = 0;
+            bool inString = false;
+            bool escaped = false;
+
+            for (int i = startIdx; i < json.Length; i++)
+            {
+                char c = json[i];
+
+                if (escaped) { escaped = false; continue; }
+                if (c == '\\') { escaped = true; continue; }
+                if (c == '"') { inString = !inString; continue; }
+                if (inString) continue;
+
+                if (c == opener) depth++;
+                else if (c == closer) depth--;
+
+                if (depth == 0)
+                    return json.Substring(startIdx, i - startIdx + 1);
+            }
+
+            return null; // Unbalanced braces
+        }
+
+        /// <summary>
         /// Tries to extract a readable error message from an API error response.
+        /// Attempts both Gemini and Groq error formats.
         /// </summary>
         private string TryExtractApiError(string responseBody)
         {
             try
             {
-                var error = JsonUtility.FromJson<GeminiApiResponse>(responseBody);
-                if (error?.error != null)
+                if (activeProvider == LLMProvider.Groq)
                 {
-                    return $"{error.error.status}: {error.error.message}";
+                    var groqErr = JsonUtility.FromJson<GroqApiResponse>(responseBody);
+                    if (groqErr?.error != null)
+                        return $"{groqErr.error.type}: {groqErr.error.message}";
+                }
+                else
+                {
+                    var geminiErr = JsonUtility.FromJson<GeminiApiResponse>(responseBody);
+                    if (geminiErr?.error != null)
+                        return $"{geminiErr.error.status}: {geminiErr.error.message}";
                 }
             }
             catch
@@ -609,25 +900,38 @@ All 5 fields are mandatory and must be non-empty strings.";
 
         /// <summary>
         /// Checks if the request would exceed free-tier rate limits.
+        /// Routes to Groq or Gemini limits based on active provider.
         /// Returns null if OK, or an error message if blocked.
         /// </summary>
         private string CheckRateLimit(GeminiModel model)
         {
             ResetDailyCountIfNeeded();
 
-            if (model == GeminiModel.Flash)
+            if (activeProvider == LLMProvider.Groq)
             {
-                if (_flashDailyCount >= flashRpdLimit)
-                    return $"Flash daily limit reached ({flashRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
-                if (GetRecentCallCount(_flashCallTimestamps) >= flashRpmLimit)
-                    return $"Flash rate limit reached ({flashRpmLimit} RPM). Wait ~60s or enable mock mode.";
+                // Groq: single shared limit across all model tiers
+                if (_groqDailyCount >= groqRpdLimit)
+                    return $"Groq daily limit reached ({groqRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
+                if (GetRecentCallCount(_groqCallTimestamps) >= groqRpmLimit)
+                    return $"Groq rate limit reached ({groqRpmLimit} RPM). Wait ~60s or enable mock mode.";
             }
             else
             {
-                if (_proDailyCount >= proRpdLimit)
-                    return $"Pro daily limit reached ({proRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
-                if (GetRecentCallCount(_proCallTimestamps) >= proRpmLimit)
-                    return $"Pro rate limit reached ({proRpmLimit} RPM). Wait ~60s or enable mock mode.";
+                // Gemini: separate Flash/Pro limits
+                if (model == GeminiModel.Flash)
+                {
+                    if (_flashDailyCount >= flashRpdLimit)
+                        return $"Flash daily limit reached ({flashRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
+                    if (GetRecentCallCount(_flashCallTimestamps) >= flashRpmLimit)
+                        return $"Flash rate limit reached ({flashRpmLimit} RPM). Wait ~60s or enable mock mode.";
+                }
+                else
+                {
+                    if (_proDailyCount >= proRpdLimit)
+                        return $"Pro daily limit reached ({proRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
+                    if (GetRecentCallCount(_proCallTimestamps) >= proRpmLimit)
+                        return $"Pro rate limit reached ({proRpmLimit} RPM). Wait ~60s or enable mock mode.";
+                }
             }
 
             return null;
@@ -640,7 +944,12 @@ All 5 fields are mandatory and must be non-empty strings.";
         {
             float now = Time.realtimeSinceStartup;
 
-            if (model == GeminiModel.Flash)
+            if (activeProvider == LLMProvider.Groq)
+            {
+                _groqCallTimestamps.Add(now);
+                _groqDailyCount++;
+            }
+            else if (model == GeminiModel.Flash)
             {
                 _flashCallTimestamps.Add(now);
                 _flashDailyCount++;
@@ -674,8 +983,9 @@ All 5 fields are mandatory and must be non-empty strings.";
                 _dailyDate = today;
                 _flashDailyCount = 0;
                 _proDailyCount = 0;
+                _groqDailyCount = 0;
                 if (logToConsole)
-                    Debug.Log("[GeminiAgentBridge] Daily rate limit counters reset.");
+                    Debug.Log("[AgentBridge] Daily rate limit counters reset.");
             }
         }
 

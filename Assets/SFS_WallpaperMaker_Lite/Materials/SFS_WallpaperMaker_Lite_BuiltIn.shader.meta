@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 75bc5491813645449a1ff57d63a5ab39
+ShaderImporter:
+  externalObjects: {}
+  defaultTextures: []
+  nonModifiableTextures: []
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 283478
+  packageName: Wallpaper Maker Lite
+  packageVersion: 1.0
+  assetPath: Assets/SFS_WallpaperMaker_Lite/Materials/SFS_WallpaperMaker_Lite_BuiltIn.shader
+  uploadId: 664647

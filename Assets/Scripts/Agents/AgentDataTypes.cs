@@ -10,6 +10,16 @@ using UnityEngine;
 namespace Threshold.Agents
 {
     /// <summary>
+    /// Which LLM provider to use for agent calls.
+    /// Toggle in the GeminiAgentBridge Inspector.
+    /// </summary>
+    public enum LLMProvider
+    {
+        Gemini,
+        Groq
+    }
+
+    /// <summary>
     /// Gemini model tier selection. Flash for low-latency calls (NPC Brain),
     /// Pro for complex reasoning (Director, Level Gen, QC, Reward).
     /// </summary>
@@ -246,5 +256,76 @@ namespace Threshold.Agents
         public int code;
         public string message;
         public string status;
+    }
+
+    // ========================================================================
+    // Groq API JSON structures (OpenAI-compatible chat completions format)
+    // ========================================================================
+
+    /// <summary>
+    /// Request body sent to the Groq REST API (OpenAI chat completions format).
+    /// </summary>
+    [Serializable]
+    public class GroqApiRequest
+    {
+        public string model;
+        public GroqMessage[] messages;
+        public float temperature;
+        public int max_tokens;
+        public GroqResponseFormat response_format;
+    }
+
+    [Serializable]
+    public class GroqMessage
+    {
+        public string role;
+        public string content;
+    }
+
+    [Serializable]
+    public class GroqResponseFormat
+    {
+        public string type; // "json_object"
+    }
+
+    /// <summary>
+    /// Top-level response from the Groq REST API.
+    /// </summary>
+    [Serializable]
+    public class GroqApiResponse
+    {
+        public GroqChoice[] choices;
+        public GroqUsage usage;
+        public GroqError error;
+    }
+
+    [Serializable]
+    public class GroqChoice
+    {
+        public GroqChoiceMessage message;
+        public string finish_reason;
+    }
+
+    [Serializable]
+    public class GroqChoiceMessage
+    {
+        public string role;
+        public string content;
+    }
+
+    [Serializable]
+    public class GroqUsage
+    {
+        public int prompt_tokens;
+        public int completion_tokens;
+        public int total_tokens;
+    }
+
+    [Serializable]
+    public class GroqError
+    {
+        public string message;
+        public string type;
+        public string code;
     }
 }

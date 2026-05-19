@@ -81,7 +81,7 @@ namespace Threshold.UI
 
         [Header("Room Framing")]
         [Tooltip("If true, camera adjusts zoom and position to frame the current room.")]
-        public bool roomAware = true;
+        public bool roomAware = false;
 
         [Tooltip("Module width for room calculations (matches RoomModule.moduleWidth).")]
         public float moduleWidth = 10f;
@@ -155,6 +155,8 @@ namespace Threshold.UI
             Instance = this;
 
             _camera = GetComponent<Camera>();
+
+
         }
 
         private void Start()

@@ -1,0 +1,41 @@
+---------- StarvingFox Studio - Wallpaper Maker ---------- 
+--------------------DOCUMENTATION--------------------
+
+	This shader is meant to be used to create flooring and wall covering materials.
+
+	It allows you to overlap multiple patterns using layers, either from the included pattern textures library or using your own textures.
+
+	Each layer displays on top of each other, Layer 1 being the layer on top and Layer 3 the under layer.
+
+	It is a world tiled shader so you can merge multiple primitive shapes and still get a continuous texture.
+
+	----- How to create a new wallpaper -----
+
+	1. Create a new material and assign it the SFS/WallpaperMaker shader
+	2. Select the material
+	3. Drag and drop pattern textures (SFS_WallpaperMaker/Textures) into the layer slots
+	4. Adjust tiling and colors
+	5. Apply your wallpaper to your walls/floors meshes
+
+	----- Using custom patterns -----
+
+	A pattern textures library is included, but I encourage you to make and use you own to create even more unique designs.
+
+	Make sure your patterns are squared (16x16, 32x32, 64x64, 128x128, 256x256, ...) as these tend to get the best results.
+	Also don't forget to set your texture Wrap Mode to Repeat so it can tile properly.
+
+	----- Differences between the Lite and the Pro version -----
+
+	Lite Version :
+	Max layer count = 2
+	Included wallpaper examples = 10
+	Included pattern textures = 10
+
+	Pro Version :
+	Max layer count = 5
+	Included wallpaper examples = 26
+	Included pattern textures = 59
+
+	----- URP and HDRP -----
+
+	URP and HDRP versions of this shader are present as Unity packages in the Materials folder, import the one you need for your project and use it instead of the Built-In version one.

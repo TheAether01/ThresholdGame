@@ -471,40 +471,81 @@ namespace Threshold.Generation
 
         private string BuildLevelGenPrompt(DifficultyProfile difficulty, string rejection)
         {
-            string base_prompt = @"You are the LEVEL GENERATION AGENT for THRESHOLD.
+            string base_prompt = $@"You are the LEVEL GENERATION AGENT for THRESHOLD.
+Generate a dungeon floor as a SINGLE JSON object. Output ONLY valid JSON — no explanation, no markdown fences.
 
-Given a DifficultyProfile, produce a complete room graph config.
+=== ENUM VALUES (use INTEGER values, NOT strings) ===
+RoomShape: CROSSROADS=0, T_JUNCTION=1, STRAIGHT=2, CORNER=3, DEAD_END=4
+RoomRole:  ENTRY=0, EXIT=1, PACING=2, COMBAT=3, AMBUSH=4, BOSS=5, LOOT=6, CHOKE=7
+Direction: NORTH=0, EAST=1, SOUTH=2, WEST=3
+NPCArchetype: GRUNT=0, FLANKER=1, SUPPRESSOR=2, ELITE=3
 
-ROOM SHAPES (by doorway pattern):
-- CROSSROADS: 4 doorways (N,E,S,W)
-- T_JUNCTION: 3 doorways
-- STRAIGHT: 2 opposite doorways
-- CORNER: 2 adjacent doorways
-- DEAD_END: 1 doorway
+=== DOORWAY RULES BY SHAPE ===
+CROSSROADS(0): 4 doorways — N,E,S,W all open
+T_JUNCTION(1): 3 doorways — pick any 3
+STRAIGHT(2):   2 doorways — opposite sides (N+S or E+W)
+CORNER(3):     2 doorways — adjacent sides (N+E, E+S, S+W, W+N)
+DEAD_END(4):   1 doorway only
 
-GAMEPLAY ROLES (independent of shape):
-- ENTRY: player spawn, no enemies
-- EXIT: run endpoint
-- PACING: breathing room, resources
-- COMBAT: standard encounter
-- AMBUSH: surprise spawns
-- BOSS: elite encounter (prefer CROSSROADS)
-- LOOT: optional branch with rewards
-- CHOKE: narrow tactical room
+=== STRICT VALIDATION RULES ===
+1. Exactly 1 room with role=0 (ENTRY), exactly 1 room with role=1 (EXIT)
+2. ENTRY and EXIT rooms must have EMPTY spawnZones (no enemies)
+3. Every edge must have matching doorways: if edge says roomA->roomB via direction D, roomA must have doorway D open, and roomB must have the OPPOSITE doorway open (NORTH<->SOUTH, EAST<->WEST)
+4. ALL rooms must be reachable from ENTRY via edges (BFS connectivity)
+5. Each room's doorway count must match its shape
+6. Rooms on a grid — use gridCol/gridRow. Adjacent rooms connected NORTH are at (col, row) and (col, row-1). EAST: (col, row) and (col+1, row).
 
-RULES:
-- Exactly 1 ENTRY and 1 EXIT
-- All rooms must be connected (reachable from ENTRY)
-- ENTRY and EXIT must have no enemy spawns
-- Connected rooms must have matching doorways
-- BOSS rooms should be CROSSROADS when possible
+=== DIFFICULTY PROFILE ===
+targetRoomCount: {difficulty.targetRoomCount}
+difficultyMultiplier: {difficulty.difficultyMultiplier:F1}
+baseEnemiesPerRoom: {difficulty.baseEnemiesPerRoom}
+eliteCount: {difficulty.eliteCount}
 
-Output a JSON RoomGraphConfig with rooms, edges, and metadata.";
+=== EXAMPLE (5-room linear dungeon) ===
+{{
+  ""rooms"": [
+    {{
+      ""roomId"": ""room_0"", ""gridCol"": 0, ""gridRow"": 0, ""shape"": 4, ""role"": 0, ""rotationDegrees"": 0,
+      ""doorways"": [{{""direction"": 1, ""isOpen"": true, ""connectedRoomId"": ""room_1""}}],
+      ""spawnZones"": [], ""items"": [], ""events"": []
+    }},
+    {{
+      ""roomId"": ""room_1"", ""gridCol"": 1, ""gridRow"": 0, ""shape"": 2, ""role"": 3, ""rotationDegrees"": 0,
+      ""doorways"": [{{""direction"": 3, ""isOpen"": true, ""connectedRoomId"": ""room_0""}}, {{""direction"": 1, ""isOpen"": true, ""connectedRoomId"": ""room_2""}}],
+      ""spawnZones"": [{{""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}, ""archetype"": 0, ""count"": 3, ""spawnDelay"": 0}}],
+      ""items"": [], ""events"": []
+    }},
+    {{
+      ""roomId"": ""room_2"", ""gridCol"": 2, ""gridRow"": 0, ""shape"": 3, ""role"": 2, ""rotationDegrees"": 0,
+      ""doorways"": [{{""direction"": 3, ""isOpen"": true, ""connectedRoomId"": ""room_1""}}, {{""direction"": 2, ""isOpen"": true, ""connectedRoomId"": ""room_3""}}],
+      ""spawnZones"": [], ""items"": [{{""itemType"": 0, ""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}}}], ""events"": []
+    }},
+    {{
+      ""roomId"": ""room_3"", ""gridCol"": 2, ""gridRow"": 1, ""shape"": 2, ""role"": 5, ""rotationDegrees"": 90,
+      ""doorways"": [{{""direction"": 0, ""isOpen"": true, ""connectedRoomId"": ""room_2""}}, {{""direction"": 2, ""isOpen"": true, ""connectedRoomId"": ""room_4""}}],
+      ""spawnZones"": [{{""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}, ""archetype"": 3, ""count"": 1, ""spawnDelay"": 0}}],
+      ""items"": [], ""events"": []
+    }},
+    {{
+      ""roomId"": ""room_4"", ""gridCol"": 2, ""gridRow"": 2, ""shape"": 4, ""role"": 1, ""rotationDegrees"": 0,
+      ""doorways"": [{{""direction"": 0, ""isOpen"": true, ""connectedRoomId"": ""room_3""}}],
+      ""spawnZones"": [], ""items"": [], ""events"": []
+    }}
+  ],
+  ""edges"": [
+    {{""roomIdA"": ""room_0"", ""roomIdB"": ""room_1"", ""directionFromA"": 1}},
+    {{""roomIdA"": ""room_1"", ""roomIdB"": ""room_2"", ""directionFromA"": 1}},
+    {{""roomIdA"": ""room_2"", ""roomIdB"": ""room_3"", ""directionFromA"": 2}},
+    {{""roomIdA"": ""room_3"", ""roomIdB"": ""room_4"", ""directionFromA"": 2}}
+  ],
+  ""metadata"": {{""seed"": 42, ""generationMethod"": ""gemini_level_gen"", ""noveltyScore"": 0.8, ""timestamp"": """", ""qcAttempts"": 0, ""gridWidth"": 3, ""gridHeight"": 3}}
+}}
+
+NOW generate a {difficulty.targetRoomCount}-room dungeon. Use varied shapes and roles. Include branching paths, not just linear. Output ONLY the JSON.";
 
             if (!string.IsNullOrEmpty(rejection))
             {
-                base_prompt += $"\n\nPREVIOUS ATTEMPT WAS REJECTED. Reason: {rejection}\n" +
-                               "Fix the issues and regenerate.";
+                base_prompt += $"\n\nPREVIOUS ATTEMPT REJECTED: {rejection}\nFix ALL listed issues.";
             }
 
             return base_prompt;
@@ -513,26 +554,22 @@ Output a JSON RoomGraphConfig with rooms, edges, and metadata.";
         private string BuildQcPrompt()
         {
             return @"You are the QC (Quality Control) AGENT for THRESHOLD.
+You receive a RoomGraphConfig JSON and must validate it. Output ONLY JSON — no explanation.
 
-You receive a RoomGraphConfig and must validate it for playability.
+=== VALIDATION CHECKS (all must pass) ===
+1. UNIQUE ROLES: Exactly 1 room with role=0 (ENTRY), exactly 1 with role=1 (EXIT)
+2. SPAWN SAFETY: ENTRY (role=0) and EXIT (role=1) must have empty spawnZones
+3. DOORWAY CONSISTENCY: For every edge, roomA must have an open doorway in directionFromA, and roomB must have the OPPOSITE direction open (0<->2, 1<->3)
+4. CONNECTIVITY: All rooms reachable from ENTRY via edges (BFS)
+5. SOLVABILITY: A path exists from ENTRY to EXIT via edges
+6. SHAPE MATCH: Each room's doorway count must match its shape (CROSSROADS=4, T_JUNCTION=3, STRAIGHT=2, CORNER=2, DEAD_END=1)
 
-CHECK ALL OF THESE:
-1. Connectivity: all rooms reachable from ENTRY via BFS
-2. Spawn safety: no enemies in ENTRY or EXIT rooms
-3. Doorway consistency: connected rooms have matching doorways
-4. Role constraints: exactly 1 ENTRY, exactly 1 EXIT
-5. Solvability: path exists from ENTRY to EXIT
-6. Balance: enemy count appropriate for difficulty multiplier
+OUTPUT format:
+{""status"": ""ACCEPTED"", ""failures"": [], ""validation_checks"": 6, ""passed"": 6}
+or
+{""status"": ""REJECTED"", ""failures"": [""specific failure 1"", ""specific failure 2""], ""validation_checks"": 6, ""passed"": 4}
 
-OUTPUT your action as JSON:
-{
-  ""status"": ""ACCEPTED"" or ""REJECTED"",
-  ""failures"": [""list of specific failure reasons""],
-  ""validation_checks"": <number of checks performed>,
-  ""passed"": <number passed>
-}
-
-If ANY check fails, REJECT and list all failures.";
+If ALL checks pass, output ACCEPTED. If ANY fail, output REJECTED with specific failures.";
         }
 
         // ====================================================================

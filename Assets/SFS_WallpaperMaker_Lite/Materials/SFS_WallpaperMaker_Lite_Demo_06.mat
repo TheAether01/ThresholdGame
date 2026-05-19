@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: SFS_WallpaperMaker_Lite_Demo_06
+  m_Shader: {fileID: 4800000, guid: 75bc5491813645449a1ff57d63a5ab39, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _Patern1Sprite:
+        m_Texture: {fileID: 2800000, guid: ba6fe18972092694ab04e35558a5e26c, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Patern2Sprite:
+        m_Texture: {fileID: 2800000, guid: 61cad4018e2207547a07262f2efadd9b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _Contrast: 1
+    - _Glossiness: 0
+    - _Metallic: 0
+    - _TilingPatern1: 4.23
+    - _TilingPatern2: 1.71
+    - __dirty: 1
+    m_Colors:
+    - _BaseColor: {r: 0.20345317, g: 0.2848449, b: 0.33962262, a: 1}
+    - _Patern1Color: {r: 0.28159487, g: 0.47354913, b: 0.5283019, a: 0}
+    - _Patern2Color: {r: 1, g: 0, b: 0.14982128, a: 0}
+  m_BuildTextureStacks: []

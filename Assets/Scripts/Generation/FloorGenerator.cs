@@ -21,6 +21,10 @@ namespace Threshold.Generation
         [Tooltip("Available room prefabs. Must have RoomModule components.")]
         [SerializeField] private RoomModule[] roomPrefabs;
 
+        [Header("Player Prefab")]
+        [Tooltip("Player prefab with PlayerController, PlayerHealth, PlayerWeapon. Auto-spawned at ENTRY room.")]
+        [SerializeField] private GameObject playerPrefab;
+
         [Header("Item Prefabs")]
         [Tooltip("Prefabs for each ItemType, indexed by enum order.")]
         [SerializeField] private GameObject healthKitPrefab;
@@ -33,6 +37,9 @@ namespace Threshold.Generation
         [Tooltip("Module width override. 0 = use prefab's moduleWidth.")]
         [SerializeField] private float moduleWidthOverride = 0f;
 
+        [Tooltip("Height offset above floor when spawning the player.")]
+        [SerializeField] private float playerSpawnYOffset = 0.5f;
+
         [Header("Debug")]
         [SerializeField] private bool logInstantiation = true;
 
@@ -40,6 +47,7 @@ namespace Threshold.Generation
         private readonly List<GameObject> _instantiatedRooms = new();
         private readonly List<GameObject> _instantiatedItems = new();
         private readonly Dictionary<string, RoomModule> _roomModuleMap = new();
+        private GameObject _spawnedPlayer;
 
         /// <summary>World position of the ENTRY room center.</summary>
         public Vector3 EntryWorldPosition { get; private set; }
@@ -49,6 +57,12 @@ namespace Threshold.Generation
 
         /// <summary>The config currently built in the scene.</summary>
         public RoomGraphConfig CurrentConfig { get; private set; }
+
+        /// <summary>Reference to the spawned player GameObject (null if using a pre-placed player).</summary>
+        public GameObject SpawnedPlayer => _spawnedPlayer;
+
+        /// <summary>Reference to the spawned player's Transform.</summary>
+        public Transform PlayerTransform => _spawnedPlayer != null ? _spawnedPlayer.transform : null;
 
         // ====================================================================
         // Public API
@@ -168,6 +182,35 @@ namespace Threshold.Generation
             Debug.Log("[FloorGenerator] ⚠ NavMesh: If using NavMeshAgent NPCs, rebake NavMesh now. " +
                       "Use NavMeshSurface.BuildNavMesh() at runtime or bake in Editor.");
 
+            // Auto-spawn player at entry position
+            if (playerPrefab != null)
+            {
+                SpawnPlayer();
+            }
+            else
+            {
+                // If no prefab, try to find an existing player in the scene and teleport
+                var existingPlayer = GameObject.FindGameObjectWithTag("Player");
+                if (existingPlayer != null)
+                {
+                    var controller = existingPlayer.GetComponent<Threshold.Player.PlayerController>();
+                    if (controller != null)
+                    {
+                        controller.TeleportTo(EntryWorldPosition + Vector3.up * playerSpawnYOffset);
+                    }
+                    else
+                    {
+                        existingPlayer.transform.position = EntryWorldPosition + Vector3.up * playerSpawnYOffset;
+                    }
+                    Debug.Log($"[FloorGenerator] Teleported existing player to entry: {EntryWorldPosition}");
+                }
+                else
+                {
+                    Debug.LogWarning("[FloorGenerator] No playerPrefab assigned and no Player found in scene. " +
+                                     "Assign a prefab or place a Player GameObject with tag 'Player'.");
+                }
+            }
+
             return true;
         }
 
@@ -176,6 +219,13 @@ namespace Threshold.Generation
         /// </summary>
         public void CleanUp()
         {
+            // Destroy spawned player
+            if (_spawnedPlayer != null)
+            {
+                Destroy(_spawnedPlayer);
+                _spawnedPlayer = null;
+            }
+
             foreach (var obj in _instantiatedRooms)
             {
                 if (obj != null) Destroy(obj);
@@ -218,6 +268,82 @@ namespace Threshold.Generation
         {
             var module = GetRoomModule(roomId);
             return module != null ? module.spawnPoints : null;
+        }
+
+        // ====================================================================
+        // Player Spawning
+        // ====================================================================
+
+        /// <summary>
+        /// Spawns the player at the ENTRY room position. If a player already
+        /// exists in the scene, teleports it instead.
+        /// Returns the player's Transform for use with SpawnAllNPCs.
+        /// </summary>
+        public Transform SpawnPlayer()
+        {
+            // Check if a player already exists
+            var existingPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (existingPlayer != null)
+            {
+                // Teleport existing player
+                existingPlayer.transform.position = EntryWorldPosition + Vector3.up * playerSpawnYOffset;
+
+                var controller = existingPlayer.GetComponent<Threshold.Player.PlayerController>();
+                controller?.TeleportTo(EntryWorldPosition + Vector3.up * playerSpawnYOffset);
+
+                _spawnedPlayer = existingPlayer;
+                Debug.Log($"[FloorGenerator] Existing player teleported to {EntryWorldPosition}");
+                return existingPlayer.transform;
+            }
+
+            // Spawn from prefab
+            if (playerPrefab == null)
+            {
+                Debug.LogError("[FloorGenerator] Cannot spawn player — playerPrefab is not assigned.");
+                return null;
+            }
+
+            Vector3 spawnPos = EntryWorldPosition + Vector3.up * playerSpawnYOffset;
+            _spawnedPlayer = Instantiate(playerPrefab, spawnPos, Quaternion.identity);
+            _spawnedPlayer.name = "Player";
+
+            // Ensure it has the Player tag
+            if (!_spawnedPlayer.CompareTag("Player"))
+            {
+                try { _spawnedPlayer.tag = "Player"; }
+                catch { Debug.LogWarning("[FloorGenerator] Could not set 'Player' tag. Add it via Tags and Layers."); }
+            }
+
+            // Set up camera to follow the new player
+            var camera = Threshold.UI.TopDownCamera.Instance;
+            if (camera != null)
+            {
+                camera.SetTarget(_spawnedPlayer.transform);
+            }
+
+            // Notify metrics tracker of new run
+            Threshold.Player.PlayerMetricsTracker.Instance?.OnRunStart();
+
+            if (logInstantiation)
+                Debug.Log($"[FloorGenerator] Player spawned at {spawnPos}");
+
+            return _spawnedPlayer.transform;
+        }
+
+        /// <summary>
+        /// Convenience method: spawns player + all NPCs in one call.
+        /// Use this after BuildFloor() if you didn't assign a playerPrefab
+        /// (which auto-spawns) or need to manually control the sequence.
+        /// </summary>
+        public Dictionary<string, List<Threshold.NPC.NPCStateMachine>> SpawnPlayerAndNPCs()
+        {
+            Transform player = SpawnPlayer();
+            if (player == null)
+            {
+                Debug.LogError("[FloorGenerator] Cannot spawn NPCs without a player.");
+                return new Dictionary<string, List<Threshold.NPC.NPCStateMachine>>();
+            }
+            return SpawnAllNPCs(player);
         }
 
         /// <summary>

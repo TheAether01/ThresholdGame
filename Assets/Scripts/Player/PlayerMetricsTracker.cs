@@ -125,12 +125,7 @@ namespace Threshold.Player
         private static PlayerMetricsTracker _instance;
         public static PlayerMetricsTracker Instance
         {
-            get
-            {
-                if (_instance == null)
-                    Debug.LogError("[PlayerMetrics] Instance not found in scene.");
-                return _instance;
-            }
+            get { return _instance; }
         }
 
         [Header("Configuration")]

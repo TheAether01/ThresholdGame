@@ -321,9 +321,6 @@ namespace Threshold.Generation
                 camera.SetTarget(_spawnedPlayer.transform);
             }
 
-            // Notify metrics tracker of new run
-            Threshold.Player.PlayerMetricsTracker.Instance?.OnRunStart();
-
             if (logInstantiation)
                 Debug.Log($"[FloorGenerator] Player spawned at {spawnPos}");
 

@@ -548,120 +548,6 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!1 &668396911
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 668396912}
-  - component: {fileID: 668396915}
-  - component: {fileID: 668396914}
-  - component: {fileID: 668396913}
-  m_Layer: 0
-  m_Name: Capsule
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &668396912
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 668396911}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1209691347}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!136 &668396913
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 668396911}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Radius: 0.5
-  m_Height: 2
-  m_Direction: 1
-  m_Center: {x: 0, y: 0, z: 0}
---- !u!23 &668396914
-MeshRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 668396911}
-  m_Enabled: 1
-  m_CastShadows: 1
-  m_ReceiveShadows: 1
-  m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 2
-  m_RayTraceProcedural: 0
-  m_RayTracingAccelStructBuildFlagsOverride: 0
-  m_RayTracingAccelStructBuildFlags: 1
-  m_SmallMeshCulling: 1
-  m_ForceMeshLod: -1
-  m_MeshLodSelectionBias: 0
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: 014a43350d2d736408d1d334fc966ec4, type: 2}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 3
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 0
-  m_MaskInteraction: 0
-  m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &668396915
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 668396911}
-  m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
 --- !u!1 &1065911630
 GameObject:
   m_ObjectHideFlags: 0
@@ -678,7 +564,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &1065911631
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -691,7 +577,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4e4f5dcd685d8843acd395519df7cf1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Agents.GeminiAgentBridge
-  apiKey: 
+  apiKey: AIzaSyAGYQdmXUXVeGx0I4VArNjQnh7iMOorp54
   apiBaseUrl: https://generativelanguage.googleapis.com/v1beta/models
   flashModelId: gemini-2.0-flash
   proModelId: gemini-2.0-pro
@@ -721,7 +607,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1209691346
+--- !u!1 &1244395166
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -729,28 +615,51 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1209691347}
+  - component: {fileID: 1244395168}
+  - component: {fileID: 1244395167}
   m_Layer: 0
-  m_Name: MockPlayer
+  m_Name: GameManager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &1209691347
+--- !u!114 &1244395167
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1244395166}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b49c3655e7c9f9843a9fff1d59bce093, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Threshold.Core.GameManager
+  floorGenerator: {fileID: 1971772482}
+  brainController: {fileID: 2091843324}
+  navMeshSurface: {fileID: 0}
+  targetRoomCount: 7
+  baseEnemiesPerRoom: 3
+  eliteCount: 1
+  baseDifficulty: 1
+  difficultyPerRun: 0.15
+  restartDelay: 2.5
+  initialDelay: 0.5
+  logEvents: 1
+--- !u!4 &1244395168
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1209691346}
+  m_GameObject: {fileID: 1244395166}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: 2}
+  m_LocalPosition: {x: -0, y: 0, z: -0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 668396912}
+  m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1277353447
@@ -769,7 +678,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1277353448
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -785,7 +694,7 @@ MonoBehaviour:
   floorGenerator: {fileID: 1971772482}
   brainController: {fileID: 2091843324}
   navMeshSurface: {fileID: 0}
-  playerObject: {fileID: 1209691346}
+  playerObject: {fileID: 3975537830382640273, guid: f55a6cd580d75784d85eae5f09610fa4, type: 3}
   playerSpeed: 6
   npcPrefab: {fileID: 0}
   targetRoomCount: 7
@@ -960,12 +869,14 @@ MonoBehaviour:
   - {fileID: 8045315411645630725, guid: 1abde76934dacf74b9bf9d08abc317bd, type: 3}
   - {fileID: 5810378706642482194, guid: 2617b4d04bab96246baf784a1e656273, type: 3}
   - {fileID: 6691344781977802829, guid: 707070771f2c0a14591f7c531a36d974, type: 3}
+  playerPrefab: {fileID: 3975537830382640273, guid: f55a6cd580d75784d85eae5f09610fa4, type: 3}
   healthKitPrefab: {fileID: 0}
   ammoCachePrefab: {fileID: 0}
   weaponPickupPrefab: {fileID: 0}
   shieldBoostPrefab: {fileID: 0}
   trapPrefab: {fileID: 0}
   moduleWidthOverride: 0
+  playerSpawnYOffset: 0.5
   logInstantiation: 1
   npcPrefab: {fileID: 24296769460017881, guid: 5488f24d656c9eb45878f905e153c1ec, type: 3}
 --- !u!4 &1971772483
@@ -1047,4 +958,4 @@ SceneRoots:
   - {fileID: 1971772483}
   - {fileID: 1502024835}
   - {fileID: 2091843325}
-  - {fileID: 1209691347}
+  - {fileID: 1244395168}

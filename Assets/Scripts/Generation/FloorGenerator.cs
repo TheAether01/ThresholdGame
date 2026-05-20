@@ -397,7 +397,15 @@ namespace Threshold.Generation
                 {
                     // Calculate world position from local offset + room position
                     Vector3 localOffset = zone.localPosition;
-                    // Add slight random jitter so NPCs don't stack
+                    // Spread NPCs within the same zone in a circle (not stacked)
+                    if (zone.count > 1)
+                    {
+                        float angle = (360f / zone.count) * i * Mathf.Deg2Rad;
+                        float spreadRadius = 2.0f; // 2m radius circle
+                        localOffset.x += Mathf.Cos(angle) * spreadRadius;
+                        localOffset.z += Mathf.Sin(angle) * spreadRadius;
+                    }
+                    // Add slight random jitter on top of the spread
                     localOffset.x += UnityEngine.Random.Range(-0.5f, 0.5f);
                     localOffset.z += UnityEngine.Random.Range(-0.5f, 0.5f);
                     localOffset.y = spawnYOffset;
@@ -406,52 +414,152 @@ namespace Threshold.Generation
 
                     // Spawn under unscaled container to prevent inheriting room scale
                     Transform parent = _entityContainer != null ? _entityContainer : null;
-                    GameObject npcObj = Instantiate(npcPrefab, worldPos, Quaternion.identity, parent);
                     string npcId = $"npc_{roomConfig.roomId}_{npcIndex}";
-                    npcObj.name = npcId;
 
-                    // ── Ensure physics components exist ──────────────
-                    // Collider: needed for player's hitscan raycast to hit this NPC
-                    if (npcObj.GetComponentInChildren<Collider>() == null)
+                    // ── Instantiate prefab ──────────────────────────
+                    GameObject prefabInstance = Instantiate(npcPrefab, worldPos, Quaternion.identity, parent);
+
+                    // ── Handle scaled prefabs (e.g. RoboCop at 20x) ──
+                    // NavMeshAgent doesn't work on GameObjects with large scale.
+                    // Fix: create a scale-1 wrapper parent, put the visual model as child,
+                    // and move NavMeshAgent + NPCStateMachine + Collider to the wrapper.
+
+                    // ELITE enemies are 2× the normal model size (big boss feel)
+                    if (zone.archetype == Threshold.Core.NPCArchetype.ELITE)
                     {
-                        var capsule = npcObj.AddComponent<CapsuleCollider>();
-                        // Size the collider from the renderer bounds
-                        var renderers = npcObj.GetComponentsInChildren<Renderer>();
-                        if (renderers.Length > 0)
+                        prefabInstance.transform.localScale *= 2f;
+                    }
+
+                    Vector3 prefabScale = prefabInstance.transform.localScale;
+                    bool isScaled = prefabScale.x > 1.5f || prefabScale.y > 1.5f || prefabScale.z > 1.5f;
+
+                    GameObject entityRoot; // The root that gets NavMeshAgent, StateMachine, Collider
+
+                    if (isScaled)
+                    {
+                        // Create unscaled wrapper — this is what NavMeshAgent drives
+                        entityRoot = new GameObject(npcId);
+                        entityRoot.transform.position = worldPos;
+                        entityRoot.transform.rotation = Quaternion.identity;
+                        entityRoot.transform.SetParent(parent, true);
+
+                        // Destroy components from the prefab that belong on the wrapper.
+                        // ORDER MATTERS: NPCStateMachine has [RequireComponent(typeof(NavMeshAgent))],
+                        // so we must destroy NPCStateMachine FIRST, then NavMeshAgent.
+                        var prefabSM = prefabInstance.GetComponent<Threshold.NPC.NPCStateMachine>();
+                        if (prefabSM != null) DestroyImmediate(prefabSM);
+                        var prefabAgent = prefabInstance.GetComponent<UnityEngine.AI.NavMeshAgent>();
+                        if (prefabAgent != null) DestroyImmediate(prefabAgent);
+                        var prefabCol = prefabInstance.GetComponent<CapsuleCollider>();
+                        if (prefabCol != null) DestroyImmediate(prefabCol);
+
+                        // Re-parent visual model under the wrapper
+                        prefabInstance.transform.SetParent(entityRoot.transform, false);
+                        prefabInstance.transform.localPosition = Vector3.zero;
+                        // Scale stays on the visual model (e.g. 40x)
+
+                        // Add properly-sized components to the unscaled wrapper
+                        var wrapperAgent = entityRoot.AddComponent<UnityEngine.AI.NavMeshAgent>();
+                        wrapperAgent.speed = 3.5f;
+                        wrapperAgent.radius = 0.5f;
+                        wrapperAgent.height = 2f;
+                        wrapperAgent.baseOffset = 0f;
+                        wrapperAgent.obstacleAvoidanceType = UnityEngine.AI.ObstacleAvoidanceType.HighQualityObstacleAvoidance;
+
+                        // Add world-scale collider to wrapper, sized to match the visual model
+                        var wrapperCol = entityRoot.AddComponent<CapsuleCollider>();
+                        // Calculate bounds from the visual model's renderers
+                        var childRenderers = prefabInstance.GetComponentsInChildren<Renderer>();
+                        if (childRenderers.Length > 0)
                         {
-                            Bounds b = renderers[0].bounds;
-                            foreach (var r in renderers) b.Encapsulate(r.bounds);
-                            capsule.center = npcObj.transform.InverseTransformPoint(b.center);
-                            capsule.height = b.size.y;
-                            capsule.radius = Mathf.Max(b.extents.x, b.extents.z) * 0.5f;
+                            Bounds visualBounds = childRenderers[0].bounds;
+                            foreach (var r in childRenderers) visualBounds.Encapsulate(r.bounds);
+                            // Convert world-space bounds to wrapper-local space
+                            wrapperCol.center = entityRoot.transform.InverseTransformPoint(visualBounds.center);
+                            wrapperCol.height = visualBounds.size.y;
+                            wrapperCol.radius = Mathf.Max(visualBounds.extents.x, visualBounds.extents.z) * 0.5f;
                         }
                         else
                         {
-                            capsule.height = 2f;
-                            capsule.center = Vector3.up;
-                            capsule.radius = 0.5f;
+                            // Fallback: generic humanoid size
+                            wrapperCol.height = 2f;
+                            wrapperCol.radius = 0.5f;
+                            wrapperCol.center = Vector3.up;
+                        }
+
+                        if (logInstantiation)
+                            Debug.Log($"[FloorGenerator] Wrapped scaled prefab ({prefabScale.x}x) in unscaled parent. " +
+                                $"Collider: h={wrapperCol.height:F1} r={wrapperCol.radius:F1} center={wrapperCol.center}");
+                    }
+                    else
+                    {
+                        entityRoot = prefabInstance;
+
+                        // ── Ensure physics components exist ──────────────
+                        if (entityRoot.GetComponentInChildren<Collider>() == null)
+                        {
+                            var capsule = entityRoot.AddComponent<CapsuleCollider>();
+                            var renderers = entityRoot.GetComponentsInChildren<Renderer>();
+                            if (renderers.Length > 0)
+                            {
+                                Bounds b = renderers[0].bounds;
+                                foreach (var r in renderers) b.Encapsulate(r.bounds);
+                                capsule.center = entityRoot.transform.InverseTransformPoint(b.center);
+                                capsule.height = b.size.y;
+                                capsule.radius = Mathf.Max(b.extents.x, b.extents.z) * 0.5f;
+                            }
+                            else
+                            {
+                                capsule.height = 2f;
+                                capsule.center = Vector3.up;
+                                capsule.radius = 0.5f;
+                            }
+                        }
+
+                        // NavMeshAgent: required by NPCStateMachine
+                        if (entityRoot.GetComponent<UnityEngine.AI.NavMeshAgent>() == null)
+                            entityRoot.AddComponent<UnityEngine.AI.NavMeshAgent>();
+                    }
+
+                    entityRoot.name = npcId;
+
+                    // Disable Animator root motion so NavMesh controls movement
+                    var anim = entityRoot.GetComponentInChildren<Animator>();
+                    if (anim != null) anim.applyRootMotion = false;
+
+                    // ── NPCStateMachine on the entity root ──────────
+                    var sm = entityRoot.GetComponent<Threshold.NPC.NPCStateMachine>();
+                    if (sm == null)
+                        sm = entityRoot.AddComponent<Threshold.NPC.NPCStateMachine>();
+
+                    sm.Initialize(npcId, zone.archetype, player);
+
+                    // Apply difficulty scaling from the floor config
+                    float diffMult = CurrentConfig?.difficulty?.difficultyMultiplier ?? 1.0f;
+                    sm.ApplyDifficultyModifiers(diffMult);
+
+                    // ── Force NavMeshAgent onto the NavMesh ─────────
+                    var agent = entityRoot.GetComponent<UnityEngine.AI.NavMeshAgent>();
+                    if (agent != null)
+                    {
+                        // Sample nearest valid NavMesh position and warp there
+                        if (UnityEngine.AI.NavMesh.SamplePosition(worldPos, out UnityEngine.AI.NavMeshHit navHit, 10f, UnityEngine.AI.NavMesh.AllAreas))
+                        {
+                            agent.Warp(navHit.position);
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[FloorGenerator] NPC {npcId} could not find NavMesh near {worldPos}");
                         }
                     }
 
-                    // NavMeshAgent: required by NPCStateMachine
-                    if (npcObj.GetComponent<UnityEngine.AI.NavMeshAgent>() == null)
-                        npcObj.AddComponent<UnityEngine.AI.NavMeshAgent>();
-
-                    // Disable Animator root motion so NavMesh controls movement
-                    var anim = npcObj.GetComponentInChildren<Animator>();
-                    if (anim != null) anim.applyRootMotion = false;
-
-                    var sm = npcObj.GetComponent<Threshold.NPC.NPCStateMachine>();
-                    if (sm == null)
-                        sm = npcObj.AddComponent<Threshold.NPC.NPCStateMachine>();
-
-                    sm.Initialize(npcId, zone.archetype, player);
                     spawned.Add(sm);
-                    _instantiatedNPCs.Add(npcObj);
+                    _instantiatedNPCs.Add(entityRoot);
                     npcIndex++;
 
                     if (logInstantiation)
-                        Debug.Log($"[FloorGenerator] Spawned {npcId} ({zone.archetype}) at {worldPos}");
+                        Debug.Log($"[FloorGenerator] Spawned {npcId} ({zone.archetype}) at {worldPos}" +
+                            (isScaled ? " [wrapped]" : ""));
                 }
             }
 

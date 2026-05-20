@@ -28,6 +28,25 @@ namespace Threshold.Generation
         /// </summary>
         public static RoomGraphConfig GenerateFallback(DifficultyProfile difficulty, int seed = -1)
         {
+            // Full local generation: spatial layout + roles + spawns + items
+            var config = GenerateLayout(difficulty, seed);
+            config.metadata.generationMethod = "local_fallback"; // Override hybrid tag
+            AssignRoles(config, difficulty);
+            PopulateSpawnZones(config, difficulty);
+            PopulateItems(config);
+            return config;
+        }
+
+        /// <summary>
+        /// Generates a spatially valid RoomGraphConfig with correct grid positions,
+        /// doorways, shapes, and edges. All interior rooms are set to COMBAT as
+        /// placeholder — call AssignRoles() or let the AI Populate agent assign
+        /// final roles.
+        /// Used by the hybrid pipeline (Solution B) where local code handles
+        /// spatial correctness and AI handles creative role assignment.
+        /// </summary>
+        public static RoomGraphConfig GenerateLayout(DifficultyProfile difficulty, int seed = -1)
+        {
             if (seed < 0) seed = Environment.TickCount;
             Random.InitState(seed);
 
@@ -46,7 +65,7 @@ namespace Threshold.Generation
                 metadata = new LayoutMetadata
                 {
                     seed = seed,
-                    generationMethod = "local_fallback",
+                    generationMethod = "hybrid_local_spatial",
                     timestamp = DateTime.UtcNow.ToString("o"),
                     gridWidth = gridSize,
                     gridHeight = gridSize,
@@ -121,16 +140,7 @@ namespace Threshold.Generation
             // Step 4: Determine shapes from actual doorway connections
             AssignShapesFromConnections(config);
 
-            // Step 5: Assign gameplay roles
-            AssignRoles(config, difficulty);
-
-            // Step 6: Populate spawn zones based on difficulty
-            PopulateSpawnZones(config, difficulty);
-
-            // Step 7: Add items to PACING and LOOT rooms
-            PopulateItems(config);
-
-            // Validate and fix if needed
+            // Validate and fix connectivity
             EnsureConnectivity(config, occupied, gridSize);
 
             return config;
@@ -312,7 +322,7 @@ namespace Threshold.Generation
         // Role Assignment
         // ====================================================================
 
-        private static void AssignRoles(RoomGraphConfig config, DifficultyProfile difficulty)
+        public static void AssignRoles(RoomGraphConfig config, DifficultyProfile difficulty)
         {
             // ENTRY and EXIT are already set. Assign roles to the rest.
             var interiorRooms = config.rooms.Where(r =>
@@ -413,9 +423,16 @@ namespace Threshold.Generation
                     room.role == RoomRole.PACING || room.role == RoomRole.LOOT)
                     continue;
 
-                // Skip rooms already populated (idempotency guard)
-                if (room.spawnZones != null && room.spawnZones.Count > 0)
+                // Skip rooms already populated with actual enemies (idempotency guard)
+                // Note: AI may generate spawnZones with count=0, so check TotalEnemyCount, not list.Count
+                if (room.spawnZones != null && room.TotalEnemyCount() > 0)
                     continue;
+
+                // Clear any empty/useless AI-generated spawn zones before repopulating
+                if (room.spawnZones == null)
+                    room.spawnZones = new System.Collections.Generic.List<SpawnZoneConfig>();
+                else
+                    room.spawnZones.Clear();
 
                 int baseCount = difficulty.baseEnemiesPerRoom;
                 float mult = difficulty.difficultyMultiplier;
@@ -488,7 +505,7 @@ namespace Threshold.Generation
         // Item Population
         // ====================================================================
 
-        private static void PopulateItems(RoomGraphConfig config)
+        public static void PopulateItems(RoomGraphConfig config)
         {
             foreach (var room in config.rooms)
             {

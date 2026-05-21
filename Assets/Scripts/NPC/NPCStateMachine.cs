@@ -155,8 +155,16 @@ namespace Threshold.NPC
         [Tooltip("Animator component on this NPC (or child). Auto-found if null.")]
         [SerializeField] private Animator animator;
 
-        [Tooltip("Tracer color for NPC shots.")]
-        [SerializeField] private Color npcTracerColor = new Color(1f, 0.15f, 0.1f, 0.9f);
+        [Tooltip("Bullet tracer config for NPC shots (bright red by default).")]
+        [SerializeField] private Threshold.Player.TracerConfig npcTracerConfig = Threshold.Player.TracerConfig.EnemyDefault;
+
+        [Header("Audio SFX")]
+        [Tooltip("Sound effect played when NPC fires a shot.")]
+        [SerializeField] private AudioClip shootSFX;
+
+        [Tooltip("Volume for NPC sound effects.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float sfxVolume = 0.6f;
 
         [Header("Defection VFX")]
         [Tooltip("Visual effect to play when NPC defects to ALLIED.")]
@@ -187,6 +195,7 @@ namespace Threshold.NPC
         private bool _hasLineOfSight;
         private float _distanceToPlayer;
         private Transform _currentCover;
+        private AudioSource _audioSource;
 
         // State-specific modifiers
         private float _currentFireRate;
@@ -230,6 +239,17 @@ namespace Threshold.NPC
                 }
             }
 
+            // Cache or add AudioSource for NPC SFX
+            _audioSource = GetComponent<AudioSource>();
+            if (_audioSource == null)
+                _audioSource = gameObject.AddComponent<AudioSource>();
+            _audioSource.playOnAwake = false;
+            _audioSource.spatialBlend = 0f;   // Fully 2D — always audible from top-down camera
+            _audioSource.volume = 1f;
+
+            if (shootSFX == null)
+                Debug.LogWarning($"[NPC:{gameObject.name}] shootSFX is not assigned! Assign in prefab Inspector under 'Audio SFX'.");
+
         }
 
         /// <summary>
@@ -259,6 +279,18 @@ namespace Threshold.NPC
             _agent.speed = Stats.moveSpeed;
             ApplyStateModifiers(NPCState.PATROL);
             _lastStateChangeTime = Time.time;
+        }
+
+        // ====================================================================
+        // Audio Accessors (used by FloorGenerator to preserve prefab values)
+        // ====================================================================
+
+        public AudioClip GetShootSFX() => shootSFX;
+        public float GetSFXVolume() => sfxVolume;
+        public void SetShootSFX(AudioClip clip, float volume)
+        {
+            shootSFX = clip;
+            sfxVolume = volume;
         }
 
         /// <summary>
@@ -671,8 +703,12 @@ namespace Threshold.NPC
                 // else: shot hit a wall/obstacle — no damage, tracer stops at impact
             }
 
-            // Spawn red laser tracer via ProjectileTracer (self-managing with fade + HDR glow)
-            Threshold.Player.ProjectileTracer.Spawn(origin, endPoint, npcTracerColor);
+            // Spawn bright red bullet tracer via ProjectileTracer (self-managing)
+            Threshold.Player.ProjectileTracer.Spawn(origin, endPoint, npcTracerConfig);
+
+            // Play NPC shoot sound
+            if (shootSFX != null && _audioSource != null)
+                _audioSource.PlayOneShot(shootSFX, sfxVolume);
         }
 
         // ====================================================================

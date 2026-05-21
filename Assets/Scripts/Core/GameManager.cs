@@ -72,6 +72,18 @@ namespace Threshold.Core
         [Header("Debug")]
         [SerializeField] private bool logEvents = true;
 
+        [Header("Background Music")]
+        [Tooltip("Background music clip. Fades in on run start, fades out on death.")]
+        [SerializeField] private AudioClip backgroundMusic;
+
+        [Tooltip("Max volume for background music.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float musicVolume = 0.3f;
+
+        [Tooltip("Fade duration for music transitions (seconds).")]
+        [Range(0.5f, 5f)]
+        [SerializeField] private float musicFadeDuration = 2f;
+
         // ====================================================================
         // Singleton
         // ====================================================================
@@ -120,6 +132,10 @@ namespace Threshold.Core
         // Director Agent profile (set between runs)
         private DifficultyProfile _directorProfile;
 
+        // Background music
+        private AudioSource _bgmSource;
+        private Coroutine _bgmFadeCoroutine;
+
         // ====================================================================
         // Enums
         // ====================================================================
@@ -145,10 +161,23 @@ namespace Threshold.Core
                 return;
             }
             Instance = this;
+
+            // Set up background music AudioSource
+            _bgmSource = gameObject.AddComponent<AudioSource>();
+            _bgmSource.playOnAwake = false;
+            _bgmSource.loop = true;
+            _bgmSource.spatialBlend = 0f; // 2D
+            _bgmSource.volume = 0f;
         }
 
         private void Start()
         {
+            // Disables VSync (required for targetFrameRate to work)
+            QualitySettings.vSyncCount = 0;
+
+            // Sets the target frame rate to 60
+            Application.targetFrameRate = 60;
+
             CreateOverlayUI();
 
             // Validate references
@@ -283,6 +312,9 @@ namespace Threshold.Core
             float difficulty = baseDifficulty + (CompletedRuns * difficultyPerRun);
             Log($"═══ RUN {CurrentRun} ACTIVE — {_totalNPCCount} NPCs, " +
                 $"Difficulty: {difficulty:F1}x ═══", "HEADER");
+
+            // Step 10: Fade in background music
+            FadeBGM(true);
         }
 
         // ====================================================================
@@ -600,6 +632,9 @@ namespace Threshold.Core
             Phase = GamePhase.LevelCleared;
             CompletedRuns++;
 
+            // Fade out music for transition
+            FadeBGM(false);
+
             Log($"═══ LEVEL CLEARED! Run {CurrentRun} complete. ═══", "WIN");
 
             // Report to metrics
@@ -619,6 +654,9 @@ namespace Threshold.Core
         {
             if (Phase != GamePhase.Playing) return;
             Phase = GamePhase.PlayerDied;
+
+            // Fade out music
+            FadeBGM(false);
 
             Log($"═══ PLAYER ELIMINATED — Run {CurrentRun} ═══", "DEATH");
 
@@ -739,6 +777,61 @@ namespace Threshold.Core
             {
                 Log($"Reward Agent error: {ex.Message}. XP not awarded.");
             }
+        }
+
+        // ====================================================================
+        // Background Music
+        // ====================================================================
+
+        private void FadeBGM(bool fadeIn)
+        {
+            if (_bgmSource == null || backgroundMusic == null) return;
+
+            if (_bgmFadeCoroutine != null)
+                StopCoroutine(_bgmFadeCoroutine);
+
+            _bgmFadeCoroutine = StartCoroutine(FadeBGMCoroutine(fadeIn));
+        }
+
+        private IEnumerator FadeBGMCoroutine(bool fadeIn)
+        {
+            if (fadeIn)
+            {
+                // Start playing if not already
+                if (!_bgmSource.isPlaying)
+                {
+                    _bgmSource.clip = backgroundMusic;
+                    _bgmSource.volume = 0f;
+                    _bgmSource.Play();
+                }
+
+                // Fade in
+                float elapsed = 0f;
+                float startVol = _bgmSource.volume;
+                while (elapsed < musicFadeDuration)
+                {
+                    elapsed += Time.unscaledDeltaTime;
+                    _bgmSource.volume = Mathf.Lerp(startVol, musicVolume, elapsed / musicFadeDuration);
+                    yield return null;
+                }
+                _bgmSource.volume = musicVolume;
+            }
+            else
+            {
+                // Fade out
+                float elapsed = 0f;
+                float startVol = _bgmSource.volume;
+                while (elapsed < musicFadeDuration)
+                {
+                    elapsed += Time.unscaledDeltaTime;
+                    _bgmSource.volume = Mathf.Lerp(startVol, 0f, elapsed / musicFadeDuration);
+                    yield return null;
+                }
+                _bgmSource.volume = 0f;
+                _bgmSource.Stop();
+            }
+
+            _bgmFadeCoroutine = null;
         }
 
         // ====================================================================

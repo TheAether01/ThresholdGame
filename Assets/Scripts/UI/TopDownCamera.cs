@@ -97,11 +97,18 @@ namespace Threshold.UI
         // ====================================================================
 
         [Header("Screen Shake")]
-        [Tooltip("Shake decay curve. X=time(0-1), Y=intensity(0-1).")]
-        public AnimationCurve shakeDecayCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+        [Tooltip("Shake decay curve. X=time(0-1), Y=intensity(0-1). Default: damped spring.")]
+        public AnimationCurve shakeDecayCurve = new AnimationCurve(
+            new Keyframe(0.00f, 1.0f, 0f, -8f),    // Instant full impact, sharp drop
+            new Keyframe(0.12f, 0.6f, 0f, 4f),      // Quick bounce back
+            new Keyframe(0.25f, 0.35f, 0f, -2f),    // Second smaller decay
+            new Keyframe(0.50f, 0.15f, 0f, 1f),     // Tiny bounce
+            new Keyframe(0.75f, 0.05f, 0f, -0.5f),  // Nearly done
+            new Keyframe(1.00f, 0.0f, -0.2f, 0f)    // Settled
+        );
 
         [Tooltip("Maximum shake offset in world units.")]
-        public float maxShakeOffset = 0.5f;
+        public float maxShakeOffset = 0.6f;
 
         // ====================================================================
         // Runtime State

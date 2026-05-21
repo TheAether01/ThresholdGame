@@ -2064,13 +2064,17 @@ MonoBehaviour:
   useTracers: 1
   tracerConfig:
     color: {r: 0.3, g: 0.9, b: 1, a: 0.9}
-    startWidth: 0.06
-    endWidth: 0.02
-    fadeDuration: 0.1
+    startWidth: 0.2
+    endWidth: 0.2
+    bulletLength: 1
+    speed: 70
     glowIntensity: 1.5
   hitLayers:
     serializedVersion: 2
     m_Bits: 4294967295
+  shootSFX: {fileID: 8300000, guid: 5ff5bd936a30a904da907f35c8dd382e, type: 3}
+  reloadSFX: {fileID: 8300000, guid: 835650bb09b06a64283da59cab58afde, type: 3}
+  sfxVolume: 0.6
 --- !u!114 &2958416298372891501
 MonoBehaviour:
   m_ObjectHideFlags: 0

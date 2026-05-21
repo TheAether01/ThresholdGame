@@ -2849,7 +2849,7 @@ Animator:
   m_Enabled: 1
   m_Avatar: {fileID: 9000000, guid: bff429107601444d59c67940e6ad78c4, type: 3}
   m_Controller: {fileID: 9100000, guid: 674ba1874ca7036439e393d80dd77c94, type: 2}
-  m_CullingMode: 0
+  m_CullingMode: 1
   m_UpdateMode: 0
   m_ApplyRootMotion: 0
   m_LinearVelocityBlending: 0
@@ -2903,7 +2903,15 @@ MonoBehaviour:
   autoEngageOnSight: 1
   autoEngageRange: 10
   animator: {fileID: 95320324289322388}
-  npcTracerColor: {r: 1, g: 0.15, b: 0.1, a: 0.9}
+  npcTracerConfig:
+    color: {r: 1, g: 0.15, b: 0.1, a: 1}
+    startWidth: 0.3
+    endWidth: 0.3
+    bulletLength: 1
+    speed: 60
+    glowIntensity: 3
+  shootSFX: {fileID: 8300000, guid: 7a15fc41b1d885940a382f983eb3f01b, type: 3}
+  sfxVolume: 0.5
   defectionVFX: {fileID: 0}
   logStateChanges: 1
 --- !u!136 &4415453261916586647
@@ -2925,10 +2933,10 @@ CapsuleCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Radius: 0.055
-  m_Height: 0.055
+  m_Radius: 1.78
+  m_Height: 3.1677918
   m_Direction: 1
-  m_Center: {x: 0, y: 0.049, z: 0}
+  m_Center: {x: 0, y: 2, z: 0.5}
 --- !u!1 &1533244445735912
 GameObject:
   m_ObjectHideFlags: 0

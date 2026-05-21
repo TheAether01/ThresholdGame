@@ -26,12 +26,10 @@ namespace Threshold.Generation
         [SerializeField] private GameObject playerPrefab;
 
         [Header("Item Prefabs")]
-        [Tooltip("Prefabs for each ItemType, indexed by enum order.")]
+        [Tooltip("Prefabs for each ItemType.")]
         [SerializeField] private GameObject healthKitPrefab;
         [SerializeField] private GameObject ammoCachePrefab;
-        [SerializeField] private GameObject weaponPickupPrefab;
-        [SerializeField] private GameObject shieldBoostPrefab;
-        [SerializeField] private GameObject trapPrefab;
+        [SerializeField] private GameObject bandagePrefab;
 
         [Header("Settings")]
         [Tooltip("Module width override. 0 = use prefab's moduleWidth.")]
@@ -435,6 +433,12 @@ namespace Threshold.Generation
 
                     GameObject entityRoot; // The root that gets NavMeshAgent, StateMachine, Collider
 
+                    // Cache Inspector-assigned values from prefab (in case we destroy it)
+                    AudioClip cachedShootSFX = null;
+                    float cachedSFXVolume = 0.6f;
+                    Transform cachedMuzzle = null;
+                    GameObject cachedDefectionVFX = null;
+
                     if (isScaled)
                     {
                         // Create unscaled wrapper — this is what NavMeshAgent drives
@@ -446,12 +450,34 @@ namespace Threshold.Generation
                         // Destroy components from the prefab that belong on the wrapper.
                         // ORDER MATTERS: NPCStateMachine has [RequireComponent(typeof(NavMeshAgent))],
                         // so we must destroy NPCStateMachine FIRST, then NavMeshAgent.
+
+                        // Cache Inspector-assigned values from prefab BEFORE destroying
                         var prefabSM = prefabInstance.GetComponent<Threshold.NPC.NPCStateMachine>();
-                        if (prefabSM != null) DestroyImmediate(prefabSM);
+                        if (prefabSM != null)
+                        {
+                            cachedShootSFX = prefabSM.GetShootSFX();
+                            cachedSFXVolume = prefabSM.GetSFXVolume();
+                            cachedMuzzle = prefabSM.muzzlePoint;
+                            cachedDefectionVFX = prefabSM.defectionVFX;
+                            DestroyImmediate(prefabSM);
+                        }
                         var prefabAgent = prefabInstance.GetComponent<UnityEngine.AI.NavMeshAgent>();
                         if (prefabAgent != null) DestroyImmediate(prefabAgent);
+                        // Cache prefab collider values BEFORE destroying
                         var prefabCol = prefabInstance.GetComponent<CapsuleCollider>();
-                        if (prefabCol != null) DestroyImmediate(prefabCol);
+                        float cachedColHeight = 2f;
+                        float cachedColRadius = 0.5f;
+                        Vector3 cachedColCenter = Vector3.up;
+                        int cachedColDirection = 1; // Y-axis
+                        bool hadPrefabCol = prefabCol != null;
+                        if (hadPrefabCol)
+                        {
+                            cachedColHeight = prefabCol.height;
+                            cachedColRadius = prefabCol.radius;
+                            cachedColCenter = prefabCol.center;
+                            cachedColDirection = prefabCol.direction;
+                            DestroyImmediate(prefabCol);
+                        }
 
                         // Re-parent visual model under the wrapper
                         prefabInstance.transform.SetParent(entityRoot.transform, false);
@@ -466,30 +492,16 @@ namespace Threshold.Generation
                         wrapperAgent.baseOffset = 0f;
                         wrapperAgent.obstacleAvoidanceType = UnityEngine.AI.ObstacleAvoidanceType.HighQualityObstacleAvoidance;
 
-                        // Add world-scale collider to wrapper, sized to match the visual model
+                        // Add collider to wrapper using the prefab's designer-configured values
                         var wrapperCol = entityRoot.AddComponent<CapsuleCollider>();
-                        // Calculate bounds from the visual model's renderers
-                        var childRenderers = prefabInstance.GetComponentsInChildren<Renderer>();
-                        if (childRenderers.Length > 0)
-                        {
-                            Bounds visualBounds = childRenderers[0].bounds;
-                            foreach (var r in childRenderers) visualBounds.Encapsulate(r.bounds);
-                            // Convert world-space bounds to wrapper-local space
-                            wrapperCol.center = entityRoot.transform.InverseTransformPoint(visualBounds.center);
-                            wrapperCol.height = visualBounds.size.y;
-                            wrapperCol.radius = Mathf.Max(visualBounds.extents.x, visualBounds.extents.z) * 0.5f;
-                        }
-                        else
-                        {
-                            // Fallback: generic humanoid size
-                            wrapperCol.height = 2f;
-                            wrapperCol.radius = 0.5f;
-                            wrapperCol.center = Vector3.up;
-                        }
+                        wrapperCol.height = cachedColHeight;
+                        wrapperCol.radius = cachedColRadius;
+                        wrapperCol.center = cachedColCenter;
+                        wrapperCol.direction = cachedColDirection;
 
                         if (logInstantiation)
                             Debug.Log($"[FloorGenerator] Wrapped scaled prefab ({prefabScale.x}x) in unscaled parent. " +
-                                $"Collider: h={wrapperCol.height:F1} r={wrapperCol.radius:F1} center={wrapperCol.center}");
+                                $"Collider (from prefab): h={wrapperCol.height:F1} r={wrapperCol.radius:F1} center={wrapperCol.center}");
                     }
                     else
                     {
@@ -531,6 +543,11 @@ namespace Threshold.Generation
                     var sm = entityRoot.GetComponent<Threshold.NPC.NPCStateMachine>();
                     if (sm == null)
                         sm = entityRoot.AddComponent<Threshold.NPC.NPCStateMachine>();
+
+                    // Restore prefab-assigned values that were lost during wrapper creation
+                    if (cachedShootSFX != null) sm.SetShootSFX(cachedShootSFX, cachedSFXVolume);
+                    if (cachedMuzzle != null) sm.muzzlePoint = cachedMuzzle;
+                    if (cachedDefectionVFX != null) sm.defectionVFX = cachedDefectionVFX;
 
                     sm.Initialize(npcId, zone.archetype, player);
 
@@ -735,6 +752,8 @@ namespace Threshold.Generation
 
                 // Spawn under unscaled container to prevent inheriting room scale
                 Transform itemParent = _entityContainer != null ? _entityContainer : null;
+                // Raise items to y=1 so they float above the ground
+                position.y = Mathf.Max(position.y, 1f);
                 GameObject itemObj = Instantiate(prefab, position, Quaternion.identity, itemParent);
                 itemObj.name = $"Item_{item.itemType}";
                 _instantiatedItems.Add(itemObj);
@@ -747,9 +766,7 @@ namespace Threshold.Generation
             {
                 ItemType.HEALTH_KIT => healthKitPrefab,
                 ItemType.AMMO_CACHE => ammoCachePrefab,
-                ItemType.WEAPON_PICKUP => weaponPickupPrefab,
-                ItemType.SHIELD_BOOST => shieldBoostPrefab,
-                ItemType.TRAP => trapPrefab,
+                ItemType.BANDAGE => bandagePrefab,
                 _ => null
             };
         }

@@ -512,6 +512,7 @@ namespace Threshold.Generation
                 switch (room.role)
                 {
                     case RoomRole.PACING:
+                        // Full restocks at pacing (rest) rooms
                         room.items.Add(new ItemConfig
                         {
                             itemType = ItemType.HEALTH_KIT,
@@ -525,18 +526,24 @@ namespace Threshold.Generation
                         break;
 
                     case RoomRole.LOOT:
+                        // Premium loot room — medkit + ammo box
                         room.items.Add(new ItemConfig
                         {
-                            itemType = Random.value > 0.5f ? ItemType.WEAPON_PICKUP : ItemType.SHIELD_BOOST,
-                            localPosition = Vector3.zero
+                            itemType = ItemType.HEALTH_KIT,
+                            localPosition = new Vector3(-1.5f, 0, 0)
                         });
-                        // 30% chance of trap in loot room
-                        if (Random.value < 0.3f)
+                        room.items.Add(new ItemConfig
+                        {
+                            itemType = ItemType.AMMO_CACHE,
+                            localPosition = new Vector3(1.5f, 0, 0)
+                        });
+                        // 50% chance of bonus bandage
+                        if (Random.value < 0.5f)
                         {
                             room.items.Add(new ItemConfig
                             {
-                                itemType = ItemType.TRAP,
-                                localPosition = new Vector3(0, 0, -1f)
+                                itemType = ItemType.BANDAGE,
+                                localPosition = new Vector3(0, 0, 1.5f)
                             });
                         }
                         break;
@@ -559,6 +566,15 @@ namespace Threshold.Generation
                             description = "Ambush triggered — delayed spawn wave",
                             parameter = 1  // 1 = delayed spawn flag
                         });
+                        // Small pickup to scavenge during ambush
+                        if (Random.value < 0.4f)
+                        {
+                            room.items.Add(new ItemConfig
+                            {
+                                itemType = Random.value > 0.5f ? ItemType.BANDAGE : ItemType.AMMO_CACHE,
+                                localPosition = new Vector3(Random.Range(-2f, 2f), 0, Random.Range(-2f, 2f))
+                            });
+                        }
                         break;
 
                     case RoomRole.COMBAT:
@@ -568,6 +584,15 @@ namespace Threshold.Generation
                             description = "Combat engagement — spawn enemies",
                             parameter = 0
                         });
+                        // 50% chance of a bandage or ammo in combat rooms
+                        if (Random.value < 0.5f)
+                        {
+                            room.items.Add(new ItemConfig
+                            {
+                                itemType = Random.value > 0.5f ? ItemType.BANDAGE : ItemType.AMMO_CACHE,
+                                localPosition = new Vector3(Random.Range(-3f, 3f), 0, Random.Range(-3f, 3f))
+                            });
+                        }
                         break;
                 }
             }

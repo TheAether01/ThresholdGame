@@ -567,7 +567,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4e4f5dcd685d8843acd395519df7cf1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Agents.GeminiAgentBridge
-  activeProvider: 2
+  activeProvider: 1
   apiKey: 
   apiBaseUrl: https://generativelanguage.googleapis.com/v1beta/models
   flashModelId: gemini-2.0-flash
@@ -651,6 +651,9 @@ MonoBehaviour:
   restartDelay: 2.5
   initialDelay: 0.5
   logEvents: 1
+  backgroundMusic: {fileID: 8300000, guid: d680ab3e8002f7d488a86d72d5880466, type: 3}
+  musicVolume: 0.3
+  musicFadeDuration: 2
 --- !u!4 &1244395168
 Transform:
   m_ObjectHideFlags: 0
@@ -924,11 +927,9 @@ MonoBehaviour:
   - {fileID: 5810378706642482194, guid: 2617b4d04bab96246baf784a1e656273, type: 3}
   - {fileID: 6691344781977802829, guid: 707070771f2c0a14591f7c531a36d974, type: 3}
   playerPrefab: {fileID: 7130516591603394225, guid: 23f36bced4906844e97a553aac277c1d, type: 3}
-  healthKitPrefab: {fileID: 0}
-  ammoCachePrefab: {fileID: 0}
-  weaponPickupPrefab: {fileID: 0}
-  shieldBoostPrefab: {fileID: 0}
-  trapPrefab: {fileID: 0}
+  healthKitPrefab: {fileID: 1411669730742438966, guid: 1926c642848969848bafbdc37a20a59f, type: 3}
+  ammoCachePrefab: {fileID: 5896713789572285215, guid: f843ac0c1eaac4149855692eb61839e1, type: 3}
+  bandagePrefab: {fileID: 144844674840959654, guid: b2dd2611d8fd4204980144f72a3e352a, type: 3}
   moduleWidthOverride: 0
   playerSpawnYOffset: 0.5
   logInstantiation: 1

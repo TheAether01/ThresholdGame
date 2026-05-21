@@ -149,9 +149,17 @@ namespace Threshold.Player
                 return; // Can't fire while reloading
             }
 
-            // Check fire input
+            // Check fire input (touch aim stick OR PC right-click)
+            bool wantsFire = false;
             var uiManager = UI.ThresholdUIManager.Instance;
             if (uiManager != null && uiManager.IsFireHeld())
+                wantsFire = true;
+
+            // PC fallback: PlayerController.IsAiming covers mouse right-click
+            if (!wantsFire && PlayerController.Instance != null && PlayerController.Instance.IsAiming)
+                wantsFire = true;
+
+            if (wantsFire)
             {
                 TryFire();
             }

@@ -83,26 +83,26 @@ namespace Threshold.UI
         // ====================================================================
 
         private Canvas _canvas;
-        private GameObject _root;
-        private CanvasGroup _canvasGroup;
-        private RectTransform _contentPanel;
+        [SerializeField] private GameObject _root;
+        [SerializeField] private CanvasGroup _canvasGroup;
+        [SerializeField] private RectTransform _contentPanel;
 
         // Text fields
-        private Text _outcomeText;
-        private Text _roomsText;
-        private Text _killsText;
-        private Text _accuracyText;
-        private Text _timeText;
-        private Text _directorText;
-        private Text _baseXPText;
-        private Text _bonusXPText;
-        private Text _totalXPText;
-        private Text _bonusReasonText;
-        private Text _incentiveText;
-        private Text _unlockText;
-        private Text _challengeText;
-        private GameObject _unlockSection;
-        private GameObject _challengeSection;
+        [SerializeField] private Text _outcomeText;
+        [SerializeField] private Text _roomsText;
+        [SerializeField] private Text _killsText;
+        [SerializeField] private Text _accuracyText;
+        [SerializeField] private Text _timeText;
+        [SerializeField] private Text _directorText;
+        [SerializeField] private Text _baseXPText;
+        [SerializeField] private Text _bonusXPText;
+        [SerializeField] private Text _totalXPText;
+        [SerializeField] private Text _bonusReasonText;
+        [SerializeField] private Text _incentiveText;
+        [SerializeField] private Text _unlockText;
+        [SerializeField] private Text _challengeText;
+        [SerializeField] private GameObject _unlockSection;
+        [SerializeField] private GameObject _challengeSection;
 
         private void Awake()
         {
@@ -126,7 +126,7 @@ namespace Threshold.UI
                 scaler.matchWidthOrHeight = 0.5f;
                 canvasObj.AddComponent<GraphicRaycaster>();
             }
-            BuildUI();
+            if (_root == null) BuildUI();
             _root.SetActive(false);
         }
 

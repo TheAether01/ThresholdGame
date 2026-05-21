@@ -84,6 +84,8 @@ namespace Threshold.Editor
             controller.AddParameter("IsReloading", AnimatorControllerParameterType.Bool);
             controller.AddParameter("Die", AnimatorControllerParameterType.Trigger);
             controller.AddParameter("SpeedMultiplier", AnimatorControllerParameterType.Float);
+            controller.AddParameter("MoveX", AnimatorControllerParameterType.Float);
+            controller.AddParameter("MoveY", AnimatorControllerParameterType.Float);
 
             // Get the base layer state machine
             var rootStateMachine = controller.layers[0].stateMachine;
@@ -96,7 +98,10 @@ namespace Threshold.Editor
 
             AnimationClip clipIdle = FindClip(allClips, "Idle_Guard_AR");
             AnimationClip clipRun = FindClip(allClips, "Run_guard_AR");
-            AnimationClip clipWalkShoot = FindClip(allClips, "WalkFront_Shoot_AR");
+            AnimationClip clipWalkShootFront = FindClip(allClips, "WalkFront_Shoot_AR");
+            AnimationClip clipWalkShootBack = FindClip(allClips, "WalkBack_Shoot_AR");
+            AnimationClip clipWalkShootLeft = FindClip(allClips, "WalkLeft_Shoot_AR");
+            AnimationClip clipWalkShootRight = FindClip(allClips, "WalkRight_Shoot_AR");
             AnimationClip clipIdleShoot = FindClip(allClips, "Idle_Shoot_Ar");
             AnimationClip clipReload = FindClip(allClips, "Reload");
             AnimationClip clipDie = FindClip(allClips, "Die");
@@ -109,9 +114,16 @@ namespace Threshold.Editor
                 clipFire = FindClip(allClips, "Shoot_SingleShot_AR");
             }
 
+            // Fallback: if directional walk+shoot clips aren't found, use front for all
+            if (clipWalkShootBack == null) clipWalkShootBack = clipWalkShootFront;
+            if (clipWalkShootLeft == null) clipWalkShootLeft = clipWalkShootFront;
+            if (clipWalkShootRight == null) clipWalkShootRight = clipWalkShootFront;
+
             Debug.Log($"[MechWarriorSetup] Clips found: " +
                       $"Idle={clipIdle != null}, Run={clipRun != null}, " +
-                      $"WalkShoot={clipWalkShoot != null}, IdleShoot={clipIdleShoot != null}, " +
+                      $"WalkShootF={clipWalkShootFront != null}, WalkShootB={clipWalkShootBack != null}, " +
+                      $"WalkShootL={clipWalkShootLeft != null}, WalkShootR={clipWalkShootRight != null}, " +
+                      $"IdleShoot={clipIdleShoot != null}, " +
                       $"Reload={clipReload != null}, Die={clipDie != null}, " +
                       $"Fire={clipFire != null}");
 
@@ -135,10 +147,28 @@ namespace Threshold.Editor
             var idleShootState = rootStateMachine.AddState("Idle_Shoot", new Vector3(550, 0, 0));
             idleShootState.motion = clipIdleShoot ?? clipFire;
 
-            // -- WALK_SHOOT (moving + firing) --
+            // -- WALK_SHOOT (2D Blend Tree: directional walk + shoot) --
+            // Uses MoveX/MoveY to blend between front/back/left/right walk+shoot
+            var walkShootTree = new BlendTree
+            {
+                name = "WalkShoot_Directional",
+                blendType = BlendTreeType.FreeformCartesian2D,
+                blendParameter = "MoveX",
+                blendParameterY = "MoveY"
+            };
+
+            // Add directional motions: (MoveX, MoveY) coordinates
+            walkShootTree.AddChild(clipWalkShootFront, new Vector2(0f, 1f));   // Forward
+            walkShootTree.AddChild(clipWalkShootBack, new Vector2(0f, -1f));   // Backward
+            walkShootTree.AddChild(clipWalkShootLeft, new Vector2(-1f, 0f));   // Left strafe
+            walkShootTree.AddChild(clipWalkShootRight, new Vector2(1f, 0f));   // Right strafe
+
+            // Save blend tree as sub-asset of the controller
+            if (AssetDatabase.GetAssetPath(controller) != "")
+                AssetDatabase.AddObjectToAsset(walkShootTree, controller);
+
             var walkShootState = rootStateMachine.AddState("Walk_Shoot", new Vector3(550, 80, 0));
-            walkShootState.motion = clipWalkShoot;
-            // Scale playback speed by analog stick deflection
+            walkShootState.motion = walkShootTree;
             walkShootState.speedParameterActive = true;
             walkShootState.speedParameter = "SpeedMultiplier";
 

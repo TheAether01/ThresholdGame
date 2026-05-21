@@ -2037,10 +2037,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Player.PlayerHealth
   maxHealth: 100
   iFrameDuration: 0.2
+  enableSpawnImmunity: 1
+  immunityFlashRate: 8
   hitShakeIntensity: 0.25
   hitShakeDuration: 0.15
   deathShakeIntensity: 0.6
   deathShakeDuration: 0.4
+  hitSFX: {fileID: 0}
+  hitSFXVolume: 0.7
+  hitFlashDuration: 0.12
+  hitFlashColor: {r: 1, g: 0.1, b: 0.05, a: 1}
+  dangerThreshold: 0.35
 --- !u!114 &6246293988475189058
 MonoBehaviour:
   m_ObjectHideFlags: 0

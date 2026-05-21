@@ -478,13 +478,9 @@ namespace Threshold.UI.Editor
                 "\u25b6  RESUME", new Color(0.2f, 0.75f, 0.4f, 1f), btnW, btnH,
                 0.5f, 0.50f);
 
-            var restartBtn = CreateMenuButton("Btn_Restart", root.transform,
-                "\u21ba  RESTART", new Color(0.85f, 0.65f, 0.15f, 1f), btnW, btnH,
-                0.5f, 0.42f);
-
             var quitBtn = CreateMenuButton("Btn_Quit", root.transform,
                 "\u2715  QUIT", new Color(0.85f, 0.2f, 0.2f, 1f), btnW, btnH,
-                0.5f, 0.34f);
+                0.5f, 0.42f);
 
             root.SetActive(false);
 
@@ -492,7 +488,6 @@ namespace Threshold.UI.Editor
             SetPrivateField(pause, "_root", root);
             SetPrivateField(pause, "_canvasGroup", cg);
             SetPrivateField(pause, "_resumeButton", resumeBtn);
-            SetPrivateField(pause, "_restartButton", restartBtn);
             SetPrivateField(pause, "_quitButton", quitBtn);
             EditorUtility.SetDirty(pause);
         }

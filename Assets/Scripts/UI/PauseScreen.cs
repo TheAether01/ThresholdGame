@@ -26,8 +26,7 @@ namespace Threshold.UI
         /// <summary>Fired when the player taps Resume.</summary>
         public event Action OnResume;
 
-        /// <summary>Fired when the player taps Restart.</summary>
-        public event Action OnRestart;
+
 
         /// <summary>Fired when the player taps Quit.</summary>
         public event Action OnQuit;
@@ -52,7 +51,7 @@ namespace Threshold.UI
         [SerializeField] private GameObject _root;
         [SerializeField] private CanvasGroup _canvasGroup;
         [SerializeField] private Button _resumeButton;
-        [SerializeField] private Button _restartButton;
+
         [SerializeField] private Button _quitButton;
 
         // ====================================================================
@@ -78,7 +77,7 @@ namespace Threshold.UI
 
             // Wire button callbacks
             if (_resumeButton != null) _resumeButton.onClick.AddListener(HandleResume);
-            if (_restartButton != null) _restartButton.onClick.AddListener(HandleRestart);
+
             if (_quitButton != null) _quitButton.onClick.AddListener(HandleQuit);
 
             // Start hidden
@@ -138,21 +137,7 @@ namespace Threshold.UI
             OnResume?.Invoke();
         }
 
-        private void HandleRestart()
-        {
-            // Unpause first so the game loop can run
-            IsPaused = false;
-            Time.timeScale = 1f;
-            if (_root != null) _root.SetActive(false);
 
-            OnRestart?.Invoke();
-
-            Debug.Log("[ThresholdUI] Restarting...");
-
-            // Reload the current scene
-            UnityEngine.SceneManagement.SceneManager.LoadScene(
-                UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
-        }
 
         private void HandleQuit()
         {
@@ -214,13 +199,11 @@ namespace Threshold.UI
                 new Color(0.2f, 0.75f, 0.4f, 1f), new Color(0.15f, 0.6f, 0.3f, 1f),
                 btnWidth, btnHeight, 0.5f, startY);
 
-            _restartButton = CreateButton("Btn_Restart", rootObj.transform, "↺  RESTART",
-                new Color(0.85f, 0.65f, 0.15f, 1f), new Color(0.7f, 0.5f, 0.1f, 1f),
-                btnWidth, btnHeight, 0.5f, startY - 0.08f);
+
 
             _quitButton = CreateButton("Btn_Quit", rootObj.transform, "✕  QUIT",
                 new Color(0.85f, 0.2f, 0.2f, 1f), new Color(0.65f, 0.15f, 0.15f, 1f),
-                btnWidth, btnHeight, 0.5f, startY - 0.16f);
+                btnWidth, btnHeight, 0.5f, startY - 0.08f);
         }
 
         // ====================================================================

@@ -200,7 +200,6 @@ namespace Threshold.UI
 
             // Wire up pause screen events so gameplay UI is restored
             pauseScreen.OnResume += () => SetGameplayUIActive(true);
-            pauseScreen.OnRestart += () => SetGameplayUIActive(true);
 
             // Build the pause button on the HUD canvas
             BuildPauseButton();

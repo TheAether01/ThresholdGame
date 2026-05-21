@@ -129,12 +129,23 @@ namespace Threshold.UI.Editor
             var summary = summaryGO.AddComponent<RunSummaryScreen>();
             BuildAndWireRunSummary(ct, summary);
 
+            // --- PauseScreen ---
+            var pauseGO = new GameObject("PauseScreen");
+            Undo.RegisterCreatedObjectUndo(pauseGO, "Create PauseScreen");
+            pauseGO.transform.SetParent(managerGO.transform);
+            var pause = pauseGO.AddComponent<PauseScreen>();
+            BuildAndWirePauseScreen(ct, pause);
+
+            // --- Pause Button (on HUD canvas) ---
+            var pauseBtn = BuildPauseButton(ct, manager);
+
             // --- Wire manager references ---
             manager.joystick = moveStick;
             manager.aimJoystick = aimStick;
             manager.hud = hud;
             manager.defectionPopup = popup;
             manager.summaryScreen = summary;
+            manager.pauseScreen = pause;
             manager.referenceResolution = refResolution;
 
             EditorUtility.SetDirty(manager);
@@ -427,6 +438,130 @@ namespace Threshold.UI.Editor
             SetPrivateField(summary, "_root", root);
             SetPrivateField(summary, "_canvasGroup", cg);
             EditorUtility.SetDirty(summary);
+        }
+
+        // ====================================================================
+        // Pause Screen
+        // ====================================================================
+
+        private void BuildAndWirePauseScreen(Transform canvas, PauseScreen pause)
+        {
+            // ── Root overlay (full-screen dark) ──
+            var root = CreatePanel("PauseScreen_Root", canvas);
+            StretchFull(root.GetComponent<RectTransform>());
+            root.GetComponent<Image>().color = new Color(0.02f, 0.02f, 0.06f, 0.85f);
+            var cg = root.AddComponent<CanvasGroup>();
+            cg.alpha = 1f;
+
+            // ── Title ──
+            var title = CreateTextElement("Pause_Title", root.transform, "PAUSED", 48,
+                new Color(0.95f, 0.95f, 1f, 1f), TextAnchor.MiddleCenter);
+            var titleRect = title.GetComponent<RectTransform>();
+            titleRect.anchorMin = new Vector2(0.1f, 0.62f);
+            titleRect.anchorMax = new Vector2(0.9f, 0.78f);
+            titleRect.offsetMin = titleRect.offsetMax = Vector2.zero;
+            title.GetComponent<Text>().fontStyle = FontStyle.Bold;
+
+            // ── Subtitle ──
+            var sub = CreateTextElement("Pause_Sub", root.transform,
+                "\u2014 THRESHOLD \u2014", 18,
+                new Color(0.5f, 0.6f, 0.8f, 0.7f), TextAnchor.MiddleCenter);
+            var subRect = sub.GetComponent<RectTransform>();
+            subRect.anchorMin = new Vector2(0.15f, 0.57f);
+            subRect.anchorMax = new Vector2(0.85f, 0.63f);
+            subRect.offsetMin = subRect.offsetMax = Vector2.zero;
+
+            // ── Buttons ──
+            float btnW = 320f, btnH = 70f;
+
+            var resumeBtn = CreateMenuButton("Btn_Resume", root.transform,
+                "\u25b6  RESUME", new Color(0.2f, 0.75f, 0.4f, 1f), btnW, btnH,
+                0.5f, 0.50f);
+
+            var restartBtn = CreateMenuButton("Btn_Restart", root.transform,
+                "\u21ba  RESTART", new Color(0.85f, 0.65f, 0.15f, 1f), btnW, btnH,
+                0.5f, 0.42f);
+
+            var quitBtn = CreateMenuButton("Btn_Quit", root.transform,
+                "\u2715  QUIT", new Color(0.85f, 0.2f, 0.2f, 1f), btnW, btnH,
+                0.5f, 0.34f);
+
+            root.SetActive(false);
+
+            // Wire to PauseScreen
+            SetPrivateField(pause, "_root", root);
+            SetPrivateField(pause, "_canvasGroup", cg);
+            SetPrivateField(pause, "_resumeButton", resumeBtn);
+            SetPrivateField(pause, "_restartButton", restartBtn);
+            SetPrivateField(pause, "_quitButton", quitBtn);
+            EditorUtility.SetDirty(pause);
+        }
+
+        /// <summary>Creates a styled menu button and returns its Button component.</summary>
+        private Button CreateMenuButton(string name, Transform parent, string label,
+            Color bgColor, float width, float height, float anchorX, float anchorY)
+        {
+            var btnObj = CreatePanel(name, parent);
+            var btnRect = btnObj.GetComponent<RectTransform>();
+            btnRect.anchorMin = btnRect.anchorMax = new Vector2(anchorX, anchorY);
+            btnRect.pivot = new Vector2(0.5f, 0.5f);
+            btnRect.sizeDelta = new Vector2(width, height);
+            btnRect.anchoredPosition = Vector2.zero;
+
+            var btnImage = btnObj.GetComponent<Image>();
+            btnImage.color = bgColor;
+
+            var btn = btnObj.AddComponent<Button>();
+            btn.targetGraphic = btnImage;
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1f, 1f, 1f, 0.9f);
+            colors.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
+            btn.colors = colors;
+
+            var labelObj = CreateTextElement(name + "_Label", btnObj.transform, label,
+                24, Color.white, TextAnchor.MiddleCenter);
+            StretchFull(labelObj.GetComponent<RectTransform>());
+            labelObj.GetComponent<Text>().fontStyle = FontStyle.Bold;
+
+            return btn;
+        }
+
+        // ====================================================================
+        // Pause Button (HUD element)
+        // ====================================================================
+
+        private GameObject BuildPauseButton(Transform canvas, ThresholdUIManager manager)
+        {
+            var btnObj = CreatePanel("PauseButton", canvas);
+            var btnRect = btnObj.GetComponent<RectTransform>();
+            btnRect.anchorMin = btnRect.anchorMax = new Vector2(1f, 1f);
+            btnRect.pivot = new Vector2(1f, 1f);
+            btnRect.anchoredPosition = new Vector2(-24f, -82f);
+            btnRect.sizeDelta = new Vector2(60f, 60f);
+
+            var btnImage = btnObj.GetComponent<Image>();
+            btnImage.color = new Color(0.12f, 0.12f, 0.18f, 0.65f);
+            btnImage.raycastTarget = true;
+
+            // Pause icon
+            var iconObj = CreateTextElement("PauseIcon", btnObj.transform, "\u275a\u275a", 28,
+                new Color(0.9f, 0.9f, 0.95f, 0.9f), TextAnchor.MiddleCenter);
+            StretchFull(iconObj.GetComponent<RectTransform>());
+
+            var btn = btnObj.AddComponent<Button>();
+            btn.targetGraphic = btnImage;
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1f, 1f, 1f, 0.8f);
+            colors.pressedColor = new Color(0.7f, 0.7f, 0.7f, 1f);
+            btn.colors = colors;
+
+            // Note: Button onClick is wired at runtime by ThresholdUIManager.BuildPauseButton
+            // or by the user in the Inspector. We can't wire UnityEvent to instance methods
+            // from editor scripts easily, so runtime self-wiring handles this.
+
+            return btnObj;
         }
 
         // ====================================================================

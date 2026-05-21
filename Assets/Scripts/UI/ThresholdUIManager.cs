@@ -29,6 +29,7 @@ namespace Threshold.UI
         public GameplayHUD hud;
         public DefectionPopup defectionPopup;
         public RunSummaryScreen summaryScreen;
+        public PauseScreen pauseScreen;
 
         [Header("Canvas Settings")]
         public int canvasSortOrder = 100;
@@ -41,8 +42,11 @@ namespace Threshold.UI
         /// <summary>True when the summary screen is visible.</summary>
         public bool IsInSummary { get; private set; }
 
+        /// <summary>True when the game is paused.</summary>
+        public bool IsPaused => pauseScreen != null && pauseScreen.IsPaused;
+
         /// <summary>True when gameplay HUD is active.</summary>
-        public bool IsInGameplay => !IsInSummary;
+        public bool IsInGameplay => !IsInSummary && !IsPaused;
 
         // ====================================================================
         // Singleton
@@ -179,8 +183,27 @@ namespace Threshold.UI
                 }
             }
 
+            // Pause screen
+            if (pauseScreen == null)
+            {
+                pauseScreen = FindAnyObjectByType<PauseScreen>();
+                if (pauseScreen == null)
+                {
+                    var obj = new GameObject("PauseScreen");
+                    obj.transform.SetParent(transform);
+                    pauseScreen = obj.AddComponent<PauseScreen>();
+                }
+            }
+
             // Wire up the continue event
             summaryScreen.OnContinue += HandleSummaryContinue;
+
+            // Wire up pause screen events so gameplay UI is restored
+            pauseScreen.OnResume += () => SetGameplayUIActive(true);
+            pauseScreen.OnRestart += () => SetGameplayUIActive(true);
+
+            // Build the pause button on the HUD canvas
+            BuildPauseButton();
         }
 
         // ====================================================================
@@ -286,8 +309,52 @@ namespace Threshold.UI
         }
 
         // ====================================================================
+        // Pause API
+        // ====================================================================
+
+        /// <summary>
+        /// Toggles the pause state. Call from the HUD pause button.
+        /// </summary>
+        public void TogglePause()
+        {
+            if (IsInSummary) return; // Don't allow pausing during summary
+            if (pauseScreen == null) return;
+
+            if (pauseScreen.IsPaused)
+                ResumeGame();
+            else
+                PauseGame();
+        }
+
+        /// <summary>
+        /// Pauses the game and shows the pause screen.
+        /// </summary>
+        public void PauseGame()
+        {
+            if (IsInSummary || IsPaused) return;
+            if (pauseScreen == null) return;
+
+            SetGameplayUIActive(false);
+            pauseScreen.Pause();
+        }
+
+        /// <summary>
+        /// Resumes the game and hides the pause screen.
+        /// </summary>
+        public void ResumeGame()
+        {
+            if (!IsPaused) return;
+            if (pauseScreen == null) return;
+
+            pauseScreen.Resume();
+            SetGameplayUIActive(true);
+        }
+
+        // ====================================================================
         // Internal
         // ====================================================================
+
+        private GameObject _pauseButtonObj;
 
         private void SetGameplayUIActive(bool active)
         {
@@ -295,6 +362,8 @@ namespace Threshold.UI
                 joystick.gameObject.SetActive(active);
             if (aimJoystick != null)
                 aimJoystick.gameObject.SetActive(active);
+            if (_pauseButtonObj != null)
+                _pauseButtonObj.SetActive(active);
         }
 
         private void HandleSummaryContinue()
@@ -303,6 +372,59 @@ namespace Threshold.UI
             SetGameplayUIActive(true);
             Time.timeScale = 1f;
             Debug.Log("[ThresholdUI] Summary dismissed — starting next run.");
+        }
+
+        /// <summary>
+        /// Creates a small pause button (❚❚) in the top-right corner of the HUD.
+        /// </summary>
+        private void BuildPauseButton()
+        {
+            var canvas = FindAnyObjectByType<Canvas>();
+            if (canvas == null) return;
+
+            // Container
+            var btnObj = new GameObject("PauseButton", typeof(RectTransform), typeof(Image));
+            btnObj.transform.SetParent(canvas.transform, false);
+
+            var btnRect = btnObj.GetComponent<RectTransform>();
+            // Position: top-right, below the ammo bar
+            btnRect.anchorMin = btnRect.anchorMax = new Vector2(1f, 1f);
+            btnRect.pivot = new Vector2(1f, 1f);
+            btnRect.anchoredPosition = new Vector2(-24f, -82f);
+            btnRect.sizeDelta = new Vector2(60f, 60f);
+
+            var btnImage = btnObj.GetComponent<Image>();
+            btnImage.color = new Color(0.12f, 0.12f, 0.18f, 0.65f);
+            btnImage.raycastTarget = true;
+
+            // Pause icon text (❚❚)
+            var iconObj = new GameObject("PauseIcon", typeof(RectTransform), typeof(Text));
+            iconObj.transform.SetParent(btnObj.transform, false);
+            var iconRect = iconObj.GetComponent<RectTransform>();
+            iconRect.anchorMin = Vector2.zero;
+            iconRect.anchorMax = Vector2.one;
+            iconRect.offsetMin = iconRect.offsetMax = Vector2.zero;
+
+            var iconText = iconObj.GetComponent<Text>();
+            iconText.text = "❚❚";
+            iconText.fontSize = 28;
+            iconText.color = new Color(0.9f, 0.9f, 0.95f, 0.9f);
+            iconText.alignment = TextAnchor.MiddleCenter;
+            iconText.font = Font.CreateDynamicFontFromOSFont("Arial", 28);
+            iconText.raycastTarget = false;
+
+            // Button component
+            var btn = btnObj.AddComponent<Button>();
+            btn.targetGraphic = btnImage;
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1f, 1f, 1f, 0.8f);
+            colors.pressedColor = new Color(0.7f, 0.7f, 0.7f, 1f);
+            btn.colors = colors;
+            btn.onClick.AddListener(TogglePause);
+
+            _pauseButtonObj = btnObj;
+            Debug.Log("[ThresholdUI] Pause button created.");
         }
     }
 }

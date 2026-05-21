@@ -25,6 +25,7 @@ namespace Threshold.UI
         [Header("Components (auto-created if null)")]
         public TopDownCamera topDownCamera;
         public VirtualJoystick joystick;
+        public AimJoystick aimJoystick;
         public GameplayHUD hud;
         public DefectionPopup defectionPopup;
         public RunSummaryScreen summaryScreen;
@@ -118,7 +119,7 @@ namespace Threshold.UI
                 }
             }
 
-            // Virtual joystick
+            // Virtual joystick (movement — left stick)
             if (joystick == null)
             {
                 joystick = FindAnyObjectByType<VirtualJoystick>();
@@ -127,6 +128,18 @@ namespace Threshold.UI
                     var obj = new GameObject("VirtualJoystick");
                     obj.transform.SetParent(transform);
                     joystick = obj.AddComponent<VirtualJoystick>();
+                }
+            }
+
+            // Aim joystick (aim/shoot — right stick)
+            if (aimJoystick == null)
+            {
+                aimJoystick = FindAnyObjectByType<AimJoystick>();
+                if (aimJoystick == null)
+                {
+                    var obj = new GameObject("AimJoystick");
+                    obj.transform.SetParent(transform);
+                    aimJoystick = obj.AddComponent<AimJoystick>();
                 }
             }
 
@@ -247,11 +260,21 @@ namespace Threshold.UI
         }
 
         /// <summary>
-        /// Returns true while the fire button is held.
+        /// Returns true while the fire button is held (or aim stick is active).
         /// </summary>
         public bool IsFireHeld()
         {
+            if (aimJoystick != null && aimJoystick.IsAiming) return true;
             return hud != null && hud.IsFiring;
+        }
+
+        /// <summary>
+        /// Gets the current aim input from the aim joystick.
+        /// Returns Vector3 in world XZ space.
+        /// </summary>
+        public Vector3 GetAimInput()
+        {
+            return aimJoystick != null ? aimJoystick.AimDirection : Vector3.zero;
         }
 
         /// <summary>
@@ -270,6 +293,8 @@ namespace Threshold.UI
         {
             if (joystick != null)
                 joystick.gameObject.SetActive(active);
+            if (aimJoystick != null)
+                aimJoystick.gameObject.SetActive(active);
         }
 
         private void HandleSummaryContinue()

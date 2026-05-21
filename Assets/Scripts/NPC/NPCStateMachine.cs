@@ -60,34 +60,41 @@ namespace Threshold.NPC
     public struct NPCArchetypeStats
     {
         public float maxHealth;
-        public float fireRate;       // shots per second
-        public float accuracy;       // 0–1
-        public float moveSpeed;      // NavMesh speed
-        public float retreatHealth;  // health % to suggest retreat
-        public float damage;         // per-shot damage to player
+        public float fireRate;         // shots per second
+        public float accuracy;         // 0–1 (max accuracy after warmup)
+        public float moveSpeed;        // NavMesh speed
+        public float retreatHealth;    // health % to suggest retreat
+        public float damage;           // per-shot damage to player
+        public float aimTrackingSpeed; // rotation speed toward target (deg/s feel via Slerp factor)
+        public float reactionTime;     // seconds delay before first shot after entering combat state
+        public float aimWarmupTime;    // seconds for accuracy to ramp from 50% to 100% of base
 
         public static NPCArchetypeStats Grunt => new()
         {
-            maxHealth = 100f, fireRate = 1.0f, accuracy = 0.40f,
-            moveSpeed = 3.5f, retreatHealth = 0.15f, damage = 8f
+            maxHealth = 100f, fireRate = 0.8f, accuracy = 0.30f,
+            moveSpeed = 3.5f, retreatHealth = 0.15f, damage = 6f,
+            aimTrackingSpeed = 3.0f, reactionTime = 0.8f, aimWarmupTime = 2.0f
         };
 
         public static NPCArchetypeStats Flanker => new()
         {
-            maxHealth = 80f, fireRate = 1.2f, accuracy = 0.50f,
-            moveSpeed = 5.0f, retreatHealth = 0.20f, damage = 10f
+            maxHealth = 80f, fireRate = 1.0f, accuracy = 0.40f,
+            moveSpeed = 5.0f, retreatHealth = 0.20f, damage = 8f,
+            aimTrackingSpeed = 4.0f, reactionTime = 0.6f, aimWarmupTime = 1.5f
         };
 
         public static NPCArchetypeStats Suppressor => new()
         {
-            maxHealth = 120f, fireRate = 2.0f, accuracy = 0.25f,
-            moveSpeed = 2.5f, retreatHealth = 0.15f, damage = 5f
+            maxHealth = 120f, fireRate = 1.5f, accuracy = 0.20f,
+            moveSpeed = 2.5f, retreatHealth = 0.15f, damage = 4f,
+            aimTrackingSpeed = 2.0f, reactionTime = 1.0f, aimWarmupTime = 2.5f
         };
 
         public static NPCArchetypeStats Elite => new()
         {
-            maxHealth = 250f, fireRate = 1.5f, accuracy = 0.60f,
-            moveSpeed = 3.5f, retreatHealth = 0.10f, damage = 15f
+            maxHealth = 250f, fireRate = 1.2f, accuracy = 0.50f,
+            moveSpeed = 3.5f, retreatHealth = 0.10f, damage = 12f,
+            aimTrackingSpeed = 5.0f, reactionTime = 0.5f, aimWarmupTime = 1.0f
         };
 
         public static NPCArchetypeStats Get(NPCArchetype type) => type switch
@@ -148,8 +155,16 @@ namespace Threshold.NPC
         [Tooltip("Animator component on this NPC (or child). Auto-found if null.")]
         [SerializeField] private Animator animator;
 
-        [Tooltip("Tracer color for NPC shots.")]
-        [SerializeField] private Color npcTracerColor = new Color(1f, 0.15f, 0.1f, 0.9f);
+        [Tooltip("Bullet tracer config for NPC shots (bright red by default).")]
+        [SerializeField] private Threshold.Player.TracerConfig npcTracerConfig = Threshold.Player.TracerConfig.EnemyDefault;
+
+        [Header("Audio SFX")]
+        [Tooltip("Sound effect played when NPC fires a shot.")]
+        [SerializeField] private AudioClip shootSFX;
+
+        [Tooltip("Volume for NPC sound effects.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float sfxVolume = 0.6f;
 
         [Header("Defection VFX")]
         [Tooltip("Visual effect to play when NPC defects to ALLIED.")]
@@ -180,11 +195,19 @@ namespace Threshold.NPC
         private bool _hasLineOfSight;
         private float _distanceToPlayer;
         private Transform _currentCover;
+        private AudioSource _audioSource;
 
         // State-specific modifiers
         private float _currentFireRate;
         private float _currentAccuracy;
         private float _currentMoveSpeed;
+
+        // Difficulty levers
+        private float _aimTrackingSpeed;    // Current rotation speed (from stats + difficulty)
+        private float _reactionTime;        // Current reaction delay (from stats + difficulty)
+        private float _aimWarmupTime;       // Current warmup duration (from stats + difficulty)
+        private float _combatEntryTime;     // Time.time when NPC entered a combat state
+        private float _difficultyMultiplier = 1.0f; // Global difficulty scaling
 
         // ====================================================================
         // Lifecycle
@@ -195,6 +218,38 @@ namespace Threshold.NPC
             _agent = GetComponent<NavMeshAgent>();
             if (animator == null)
                 animator = GetComponentInChildren<Animator>();
+
+            // Auto-find muzzle point from eye bones if not assigned
+            if (muzzlePoint == null)
+            {
+                // Try common eye/muzzle bone names from the RoboCop model
+                string[] eyeNames = { "l_eye", "r_eye", "eyeDome", "eyeDome1" };
+                var allTransforms = GetComponentsInChildren<Transform>();
+                foreach (var t in allTransforms)
+                {
+                    foreach (var name in eyeNames)
+                    {
+                        if (t.name == name)
+                        {
+                            muzzlePoint = t;
+                            break;
+                        }
+                    }
+                    if (muzzlePoint != null) break;
+                }
+            }
+
+            // Cache or add AudioSource for NPC SFX
+            _audioSource = GetComponent<AudioSource>();
+            if (_audioSource == null)
+                _audioSource = gameObject.AddComponent<AudioSource>();
+            _audioSource.playOnAwake = false;
+            _audioSource.spatialBlend = 0f;   // Fully 2D — always audible from top-down camera
+            _audioSource.volume = 1f;
+
+            if (shootSFX == null)
+                Debug.LogWarning($"[NPC:{gameObject.name}] shootSFX is not assigned! Assign in prefab Inspector under 'Audio SFX'.");
+
         }
 
         /// <summary>
@@ -212,9 +267,48 @@ namespace Threshold.NPC
             if (waypoints != null) patrolWaypoints = waypoints;
             if (covers != null) coverPoints = covers;
 
+            // Initialize difficulty levers from archetype defaults
+            _aimTrackingSpeed = Stats.aimTrackingSpeed;
+            _reactionTime = Stats.reactionTime;
+            _aimWarmupTime = Stats.aimWarmupTime;
+
+            // Prevent frame-1 firing — NPC needs warmup time
+            _lastFireTime = Time.time;
+            _combatEntryTime = Time.time;
+
             _agent.speed = Stats.moveSpeed;
             ApplyStateModifiers(NPCState.PATROL);
             _lastStateChangeTime = Time.time;
+        }
+
+        // ====================================================================
+        // Audio Accessors (used by FloorGenerator to preserve prefab values)
+        // ====================================================================
+
+        public AudioClip GetShootSFX() => shootSFX;
+        public float GetSFXVolume() => sfxVolume;
+        public void SetShootSFX(AudioClip clip, float volume)
+        {
+            shootSFX = clip;
+            sfxVolume = volume;
+        }
+
+        /// <summary>
+        /// Apply global difficulty modifiers to this NPC's combat levers.
+        /// multiplier < 1.0 = easier, > 1.0 = harder.
+        /// Called by FloorGenerator at spawn time, or by the AI Brain at runtime.
+        /// </summary>
+        public void ApplyDifficultyModifiers(float multiplier)
+        {
+            _difficultyMultiplier = Mathf.Clamp(multiplier, 0.2f, 3.0f);
+
+            // Scale combat effectiveness with difficulty
+            _aimTrackingSpeed = Stats.aimTrackingSpeed * Mathf.Lerp(0.5f, 1.5f, (_difficultyMultiplier - 0.2f) / 2.8f);
+            _reactionTime    = Stats.reactionTime / Mathf.Max(multiplier, 0.3f);  // Higher diff = shorter reaction
+            _aimWarmupTime   = Stats.aimWarmupTime / Mathf.Max(multiplier, 0.3f);  // Higher diff = faster warmup
+
+            // Reapply state modifiers with new base values
+            ApplyStateModifiers(CurrentState);
         }
 
         private void Update()
@@ -262,6 +356,19 @@ namespace Threshold.NPC
             OnStateExit(oldState);
             CurrentState = newState;
             _lastStateChangeTime = Time.time;
+
+            // Track combat entry for reaction delay and aim warmup
+            bool isCombatState = newState == NPCState.ATTACK || newState == NPCState.FLANK ||
+                                  newState == NPCState.SUPPRESS;
+            bool wasCombatState = oldState == NPCState.ATTACK || oldState == NPCState.FLANK ||
+                                   oldState == NPCState.SUPPRESS;
+            if (isCombatState && !wasCombatState)
+            {
+                // Entering combat from non-combat — reset warmup timers
+                _combatEntryTime = Time.time;
+                _lastFireTime = Time.time; // Enforce reaction delay before first shot
+            }
+
             ApplyStateModifiers(newState);
             OnStateEnter(newState);
 
@@ -537,23 +644,33 @@ namespace Threshold.NPC
             if (_currentFireRate <= 0f) return;
             if (!_hasLineOfSight) return; // Can't fire through walls
 
+            // Reaction delay: don't fire until reaction time has elapsed since combat entry
+            float timeSinceCombatEntry = Time.time - _combatEntryTime;
+            if (timeSinceCombatEntry < _reactionTime) return;
+
             float interval = 1f / _currentFireRate;
             if (Time.time - _lastFireTime < interval) return;
             if (_distanceToPlayer > engagementRange) return;
 
             _lastFireTime = Time.time;
 
+            // Accuracy ramp: accuracy starts at 50% of base and reaches full after aimWarmupTime
+            float warmupProgress = _aimWarmupTime > 0f
+                ? Mathf.Clamp01((timeSinceCombatEntry - _reactionTime) / _aimWarmupTime)
+                : 1f;
+            float effectiveAccuracy = _currentAccuracy * Mathf.Lerp(0.5f, 1.0f, warmupProgress);
+
             // Accuracy roll: determine if shot hits
-            bool hit = UnityEngine.Random.value < _currentAccuracy;
+            bool hit = UnityEngine.Random.value < effectiveAccuracy;
 
             // Raycast to target
             Vector3 origin = muzzlePoint != null ? muzzlePoint.position : transform.position + Vector3.up;
             Vector3 dir = (targetPos + Vector3.up) - origin;
 
-            // Apply inaccuracy spread
+            // Apply inaccuracy spread (stronger during warmup)
             if (!hit)
             {
-                float spread = (1f - _currentAccuracy) * 5f;
+                float spread = (1f - effectiveAccuracy) * 5f;
                 dir += new Vector3(
                     UnityEngine.Random.Range(-spread, spread),
                     UnityEngine.Random.Range(-spread * 0.3f, spread * 0.3f),
@@ -563,20 +680,35 @@ namespace Threshold.NPC
 
             Vector3 endPoint = origin + dir.normalized * engagementRange;
 
-            if (Physics.Raycast(origin, dir.normalized, out RaycastHit hitInfo, engagementRange))
+            if (Physics.Raycast(origin, dir.normalized, out RaycastHit hitInfo, engagementRange,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 endPoint = hitInfo.point;
 
-                // Apply damage to player via PlayerHealth
-                var playerHealth = hitInfo.collider.GetComponent<Threshold.Player.PlayerHealth>();
-                if (playerHealth != null)
+                // Wall check: only apply damage if we actually hit the player,
+                // NOT if a wall/obstacle was hit first
+                bool hitPlayer = hitInfo.collider.CompareTag("Player") ||
+                    hitInfo.collider.GetComponentInParent<Threshold.Player.PlayerHealth>() != null;
+
+                if (hitPlayer)
                 {
-                    playerHealth.TakeDamage(Stats.damage);
+                    // Scale damage with difficulty multiplier
+                    float scaledDamage = Stats.damage * Mathf.Lerp(0.6f, 1.4f, (_difficultyMultiplier - 0.2f) / 2.8f);
+                    var playerHealth = hitInfo.collider.GetComponentInParent<Threshold.Player.PlayerHealth>();
+                    if (playerHealth != null)
+                    {
+                        playerHealth.TakeDamage(scaledDamage);
+                    }
                 }
+                // else: shot hit a wall/obstacle — no damage, tracer stops at impact
             }
 
-            // Spawn red laser tracer
-            Threshold.Player.ProjectileTracer.Spawn(origin, endPoint, npcTracerColor);
+            // Spawn bright red bullet tracer via ProjectileTracer (self-managing)
+            Threshold.Player.ProjectileTracer.Spawn(origin, endPoint, npcTracerConfig);
+
+            // Play NPC shoot sound
+            if (shootSFX != null && _audioSource != null)
+                _audioSource.PlayOneShot(shootSFX, sfxVolume);
         }
 
         // ====================================================================
@@ -679,7 +811,7 @@ namespace Threshold.NPC
             dir.y = 0;
             if (dir.sqrMagnitude > 0.01f)
                 transform.rotation = Quaternion.Slerp(transform.rotation,
-                    Quaternion.LookRotation(dir), Time.deltaTime * 8f);
+                    Quaternion.LookRotation(dir), Time.deltaTime * _aimTrackingSpeed);
         }
 
         // ====================================================================
@@ -764,6 +896,7 @@ namespace Threshold.NPC
             if (animator != null)
                 animator.enabled = false;
 
+
             if (logStateChanges)
                 Debug.Log($"[NPC {npcId}] DEAD");
 
@@ -803,8 +936,11 @@ namespace Threshold.NPC
         // ====================================================================
 
         /// <summary>
-        /// Drives animator parameters from NavMeshAgent velocity.
-        /// Works with the RoboCop controller (Walk_Anim bool).
+        /// Drives animator parameters from NavMeshAgent velocity and NPC state.
+        /// Parameters: Walk_Anim (bool), IsAttacking (bool).
+        /// - Walk_Anim: true when the NPC is moving (NavMeshAgent has velocity)
+        /// - IsAttacking: true during combat states (ATTACK, SUPPRESS, FLANK)
+        ///   Forces Idle_Loop_S (look-around/combat stance) for shooting
         /// </summary>
         private void UpdateAnimator()
         {
@@ -814,6 +950,12 @@ namespace Threshold.NPC
             bool isMoving = _agent != null && _agent.enabled &&
                             _agent.velocity.sqrMagnitude > 0.1f;
             animator.SetBool("Walk_Anim", isMoving);
+
+            // IsAttacking = true during combat states → switches to Idle_Loop_S
+            bool isAttacking = CurrentState == NPCState.ATTACK ||
+                               CurrentState == NPCState.SUPPRESS ||
+                               CurrentState == NPCState.FLANK;
+            animator.SetBool("IsAttacking", isAttacking);
         }
 
         // ====================================================================

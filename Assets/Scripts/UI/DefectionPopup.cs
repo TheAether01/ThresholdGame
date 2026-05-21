@@ -43,13 +43,13 @@ namespace Threshold.UI
         // ====================================================================
 
         private Canvas _canvas;
-        private GameObject _popupRoot;
-        private RectTransform _popupRect;
-        private CanvasGroup _canvasGroup;
-        private Text _titleText;
-        private Text _nameText;
-        private Text _subtitleText;
-        private Image _accentBar;
+        [SerializeField] private GameObject _popupRoot;
+        [SerializeField] private RectTransform _popupRect;
+        [SerializeField] private CanvasGroup _canvasGroup;
+        [SerializeField] private Text _titleText;
+        [SerializeField] private Text _nameText;
+        [SerializeField] private Text _subtitleText;
+        [SerializeField] private Image _accentBar;
         private bool _isShowing;
 
         private void Awake()
@@ -61,7 +61,7 @@ namespace Threshold.UI
         private void Start()
         {
             _canvas = FindAnyObjectByType<Canvas>();
-            BuildUI();
+            if (_popupRoot == null) BuildUI();
             _popupRoot.SetActive(false);
         }
 

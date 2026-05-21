@@ -1,463 +1,480 @@
 // ============================================================================
-// ThresholdUIBuilder.cs — Editor tool to build THRESHOLD UI in scene
-// Creates the exact same UI hierarchy that the runtime scripts build
-// programmatically, so it's visible and editable in the Unity Editor.
-//
-// Usage: Menu > THRESHOLD > Build UI In Scene
+// ThresholdUIBuilder.cs — Editor tool to build the complete THRESHOLD UI
+// Creates the full UI hierarchy AND attaches + wires all runtime scripts.
+// Both movement (left) and aim (right) use analogue sticks with outer/inner.
 // ============================================================================
 
 #if UNITY_EDITOR
-using UnityEditor;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using UnityEditor;
+using System.Reflection;
 
 namespace Threshold.UI.Editor
 {
-    public static class ThresholdUIBuilder
+    public class ThresholdUIBuilder : EditorWindow
     {
-        // ====================================================================
-        // Menu Entry
-        // ====================================================================
+        // Joystick settings
+        private float joystickBaseSize = 200f;
+        private float joystickKnobRatio = 0.45f;
+        private Color moveOuterColor = new(1f, 1f, 1f, 0.15f);
+        private Color moveInnerColor = new(1f, 1f, 1f, 0.5f);
+        private Color aimOuterColor = new(1f, 1f, 1f, 0.15f);
+        private Color aimInnerColor = new(0.95f, 0.25f, 0.25f, 0.6f);
 
-        [MenuItem("THRESHOLD/Build UI In Scene", false, 100)]
-        public static void BuildAll()
+        // HUD settings
+        private Color healthFullColor = new(0.2f, 0.9f, 0.4f, 1f);
+        private Color ammoColor = new(1f, 0.85f, 0.3f, 1f);
+        private Vector2 refResolution = new(1080, 1920);
+
+        [MenuItem("Threshold/Build UI Hierarchy")]
+        public static void ShowWindow()
         {
-            // Clean existing
-            var existing = GameObject.Find("THRESHOLD_UI");
-            if (existing != null)
-            {
-                if (!EditorUtility.DisplayDialog("THRESHOLD UI Builder",
-                    "Existing THRESHOLD_UI found. Replace it?", "Replace", "Cancel"))
-                    return;
-                Undo.DestroyObjectImmediate(existing);
-            }
+            GetWindow<ThresholdUIBuilder>("Threshold UI Builder");
+        }
 
-            // Root
-            var root = new GameObject("THRESHOLD_UI");
-            Undo.RegisterCreatedObjectUndo(root, "Build THRESHOLD UI");
+        private void OnGUI()
+        {
+            GUILayout.Label("THRESHOLD UI Builder", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Builds the complete gameplay UI hierarchy with all runtime scripts\n" +
+                "attached and wired. Both sticks have outer (bg) + inner (knob) images.",
+                MessageType.Info);
 
-            // Canvas
-            var canvas = BuildCanvas(root.transform);
+            EditorGUILayout.Space(8);
+            GUILayout.Label("Stick Settings", EditorStyles.boldLabel);
+            joystickBaseSize = EditorGUILayout.FloatField("Base Size", joystickBaseSize);
+            joystickKnobRatio = EditorGUILayout.Slider("Knob Ratio", joystickKnobRatio, 0.2f, 0.8f);
 
-            // EventSystem
-            BuildEventSystem();
+            EditorGUILayout.Space(4);
+            GUILayout.Label("Move Stick (Left)", EditorStyles.miniBoldLabel);
+            moveOuterColor = EditorGUILayout.ColorField("Outer", moveOuterColor);
+            moveInnerColor = EditorGUILayout.ColorField("Inner", moveInnerColor);
 
-            // UI Manager
-            var mgr = root.AddComponent<ThresholdUIManager>();
+            GUILayout.Label("Aim Stick (Right)", EditorStyles.miniBoldLabel);
+            aimOuterColor = EditorGUILayout.ColorField("Outer", aimOuterColor);
+            aimInnerColor = EditorGUILayout.ColorField("Inner", aimInnerColor);
 
-            // Joystick
-            var joystickGo = new GameObject("VirtualJoystick");
-            joystickGo.transform.SetParent(root.transform);
-            var joystick = joystickGo.AddComponent<VirtualJoystick>();
-            BuildJoystickVisuals(canvas.transform, joystick);
-            mgr.joystick = joystick;
+            EditorGUILayout.Space(4);
+            GUILayout.Label("HUD", EditorStyles.boldLabel);
+            refResolution = EditorGUILayout.Vector2Field("Ref Resolution", refResolution);
+            healthFullColor = EditorGUILayout.ColorField("Health Color", healthFullColor);
+            ammoColor = EditorGUILayout.ColorField("Ammo Color", ammoColor);
 
-            // HUD
-            var hudGo = new GameObject("GameplayHUD");
-            hudGo.transform.SetParent(root.transform);
-            var hud = hudGo.AddComponent<GameplayHUD>();
-            BuildHUDVisuals(canvas.transform);
-            mgr.hud = hud;
-
-            // Defection Popup
-            var popupGo = new GameObject("DefectionPopup");
-            popupGo.transform.SetParent(root.transform);
-            var popup = popupGo.AddComponent<DefectionPopup>();
-            BuildDefectionPopupVisuals(canvas.transform);
-            mgr.defectionPopup = popup;
-
-            // Run Summary
-            var summaryGo = new GameObject("RunSummaryScreen");
-            summaryGo.transform.SetParent(root.transform);
-            var summary = summaryGo.AddComponent<RunSummaryScreen>();
-            BuildRunSummaryVisuals(canvas.transform);
-            mgr.summaryScreen = summary;
-
-            // TopDownCamera on main camera
-            var cam = Camera.main;
-            if (cam != null)
-            {
-                var tdc = cam.GetComponent<TopDownCamera>();
-                if (tdc == null) tdc = cam.gameObject.AddComponent<TopDownCamera>();
-                mgr.topDownCamera = tdc;
-            }
-
-            Selection.activeGameObject = root;
-            Debug.Log("[ThresholdUIBuilder] UI hierarchy created successfully.");
+            EditorGUILayout.Space(12);
+            if (GUILayout.Button("Build UI Hierarchy", GUILayout.Height(36)))
+                BuildAll();
         }
 
         // ====================================================================
-        // Canvas & EventSystem
+        // Master Build
         // ====================================================================
 
-        static Canvas BuildCanvas(Transform parent)
+        private void BuildAll()
         {
-            var obj = new GameObject("THRESHOLD_Canvas");
-            obj.transform.SetParent(parent, false);
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Build Threshold UI");
 
-            var canvas = obj.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 100;
+            var canvasGO = CreateCanvas();
+            var ct = canvasGO.transform;
+            EnsureEventSystem();
 
-            var scaler = obj.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1080, 1920);
-            scaler.matchWidthOrHeight = 0.5f;
+            // --- ThresholdUIManager (root manager) ---
+            var managerGO = new GameObject("ThresholdUIManager");
+            Undo.RegisterCreatedObjectUndo(managerGO, "Create UIManager");
+            var manager = managerGO.AddComponent<ThresholdUIManager>();
 
-            obj.AddComponent<GraphicRaycaster>();
-            return canvas;
+            // --- Move Stick (left) ---
+            var moveStickGO = new GameObject("MoveStick");
+            Undo.RegisterCreatedObjectUndo(moveStickGO, "Create MoveStick");
+            moveStickGO.transform.SetParent(managerGO.transform);
+            var moveStick = moveStickGO.AddComponent<VirtualJoystick>();
+            moveStick.baseSize = joystickBaseSize;
+            moveStick.knobRatio = joystickKnobRatio;
+            moveStick.baseColor = moveOuterColor;
+            moveStick.knobColor = moveInnerColor;
+            BuildAndWireMoveStick(ct, moveStick);
+
+            // --- Aim Stick (right) ---
+            var aimStickGO = new GameObject("AimStick");
+            Undo.RegisterCreatedObjectUndo(aimStickGO, "Create AimStick");
+            aimStickGO.transform.SetParent(managerGO.transform);
+            var aimStick = aimStickGO.AddComponent<AimJoystick>();
+            aimStick.baseSize = joystickBaseSize;
+            aimStick.knobRatio = joystickKnobRatio;
+            aimStick.baseColor = aimOuterColor;
+            aimStick.knobColor = aimInnerColor;
+            BuildAndWireAimStick(ct, aimStick);
+
+            // --- GameplayHUD ---
+            var hudGO = new GameObject("GameplayHUD");
+            Undo.RegisterCreatedObjectUndo(hudGO, "Create HUD");
+            hudGO.transform.SetParent(managerGO.transform);
+            var hud = hudGO.AddComponent<GameplayHUD>();
+            hud.healthFullColor = healthFullColor;
+            BuildAndWireHUD(ct, hud);
+
+            // --- DefectionPopup ---
+            var popupGO = new GameObject("DefectionPopup");
+            Undo.RegisterCreatedObjectUndo(popupGO, "Create Popup");
+            popupGO.transform.SetParent(managerGO.transform);
+            var popup = popupGO.AddComponent<DefectionPopup>();
+            BuildAndWireDefectionPopup(ct, popup);
+
+            // --- RunSummaryScreen ---
+            var summaryGO = new GameObject("RunSummaryScreen");
+            Undo.RegisterCreatedObjectUndo(summaryGO, "Create Summary");
+            summaryGO.transform.SetParent(managerGO.transform);
+            var summary = summaryGO.AddComponent<RunSummaryScreen>();
+            BuildAndWireRunSummary(ct, summary);
+
+            // --- Wire manager references ---
+            manager.joystick = moveStick;
+            manager.aimJoystick = aimStick;
+            manager.hud = hud;
+            manager.defectionPopup = popup;
+            manager.summaryScreen = summary;
+            manager.referenceResolution = refResolution;
+
+            EditorUtility.SetDirty(manager);
+            Selection.activeGameObject = canvasGO;
+            Debug.Log("[ThresholdUIBuilder] Complete UI hierarchy built with all scripts wired.");
         }
 
-        static void BuildEventSystem()
-        {
-            if (Object.FindAnyObjectByType<EventSystem>() != null) return;
-            var obj = new GameObject("EventSystem");
-            obj.AddComponent<EventSystem>();
-            obj.AddComponent<StandaloneInputModule>();
-        }
-
         // ====================================================================
-        // Virtual Joystick
+        // Move Stick (Left)
         // ====================================================================
 
-        static void BuildJoystickVisuals(Transform canvasT, VirtualJoystick joystick)
+        private void BuildAndWireMoveStick(Transform canvas, VirtualJoystick stick)
         {
-            // Touch capture area (left half of screen)
-            var touchArea = CreateUI("Joystick_TouchArea", canvasT);
-            var touchRect = Rect(touchArea);
-            touchRect.anchorMin = Vector2.zero;
+            // Touch area — left half
+            var touchArea = CreateUIElement("MoveStick_TouchArea", canvas);
+            var touchRect = touchArea.GetComponent<RectTransform>();
+            touchRect.anchorMin = new Vector2(0f, 0f);
             touchRect.anchorMax = new Vector2(0.5f, 0.5f);
             touchRect.offsetMin = Vector2.zero;
             touchRect.offsetMax = Vector2.zero;
             var touchImg = touchArea.AddComponent<Image>();
-            touchImg.color = Color.clear;
+            touchImg.color = new Color(0, 0, 0, 0.01f);
             touchImg.raycastTarget = true;
-            touchArea.AddComponent<JoystickTouchProxy>();
+            var proxy = touchArea.AddComponent<JoystickTouchProxy>();
+            proxy.joystick = stick;
 
-            // Base circle
-            var baseObj = CreateUI("Joystick_Base", canvasT);
-            var baseRect = Rect(baseObj);
-            baseRect.sizeDelta = new Vector2(200f, 200f);
-            baseRect.anchorMin = Vector2.zero;
-            baseRect.anchorMax = Vector2.zero;
-            baseRect.pivot = new Vector2(0.5f, 0.5f);
-            baseRect.anchoredPosition = new Vector2(140f, 140f);
-            var baseImg = baseObj.AddComponent<Image>();
-            baseImg.color = new Color(1f, 1f, 1f, 0.15f);
-            baseImg.raycastTarget = false;
-            ApplyCircleSprite(baseImg);
+            // Outer (base)
+            var outer = CreateUIElement("MoveStick_Outer", canvas);
+            var outerRect = outer.GetComponent<RectTransform>();
+            outerRect.anchorMin = outerRect.anchorMax = Vector2.zero;
+            outerRect.pivot = new Vector2(0.5f, 0.5f);
+            outerRect.anchoredPosition = new Vector2(140f, 140f);
+            outerRect.sizeDelta = new Vector2(joystickBaseSize, joystickBaseSize);
+            var outerImg = outer.AddComponent<Image>();
+            outerImg.color = moveOuterColor;
+            outerImg.raycastTarget = false;
+            AssignCircleSprite(outerImg);
 
-            // Knob
-            var knobObj = CreateUI("Joystick_Knob", baseRect);
-            var knobRect = Rect(knobObj);
-            knobRect.sizeDelta = new Vector2(90f, 90f); // 200 * 0.45
-            knobRect.anchoredPosition = Vector2.zero;
-            var knobImg = knobObj.AddComponent<Image>();
-            knobImg.color = new Color(1f, 1f, 1f, 0.5f);
-            knobImg.raycastTarget = false;
-            ApplyCircleSprite(knobImg);
+            // Inner (knob)
+            float knobSize = joystickBaseSize * joystickKnobRatio;
+            var inner = CreateUIElement("MoveStick_Inner", outer.transform);
+            var innerRect = inner.GetComponent<RectTransform>();
+            innerRect.anchoredPosition = Vector2.zero;
+            innerRect.sizeDelta = new Vector2(knobSize, knobSize);
+            var innerImg = inner.AddComponent<Image>();
+            innerImg.color = moveInnerColor;
+            innerImg.raycastTarget = false;
+            AssignCircleSprite(innerImg);
+
+            // Wire serialized fields via reflection
+            SetPrivateField(stick, "_baseRect", outerRect);
+            SetPrivateField(stick, "_knobRect", innerRect);
+            SetPrivateField(stick, "_baseImage", outerImg);
+            SetPrivateField(stick, "_knobImage", innerImg);
+            EditorUtility.SetDirty(stick);
         }
 
         // ====================================================================
-        // Gameplay HUD
+        // Aim Stick (Right)
         // ====================================================================
 
-        static void BuildHUDVisuals(Transform canvasT)
+        private void BuildAndWireAimStick(Transform canvas, AimJoystick stick)
         {
-            // --- Health Bar (top-left) ---
-            var healthContainer = CreatePanel("HealthBar_Container", canvasT,
-                new Color(0, 0, 0, 0));
-            var hcRect = Rect(healthContainer);
-            hcRect.anchorMin = new Vector2(0f, 1f);
-            hcRect.anchorMax = new Vector2(0f, 1f);
-            hcRect.pivot = new Vector2(0f, 1f);
-            hcRect.anchoredPosition = new Vector2(24f, -24f);
-            hcRect.sizeDelta = new Vector2(300f, 50f);
+            // Touch area — right half
+            var touchArea = CreateUIElement("AimStick_TouchArea", canvas);
+            var touchRect = touchArea.GetComponent<RectTransform>();
+            touchRect.anchorMin = new Vector2(0.5f, 0f);
+            touchRect.anchorMax = new Vector2(1f, 0.5f);
+            touchRect.offsetMin = Vector2.zero;
+            touchRect.offsetMax = Vector2.zero;
+            var touchImg = touchArea.AddComponent<Image>();
+            touchImg.color = new Color(0, 0, 0, 0.01f);
+            touchImg.raycastTarget = true;
+            var proxy = touchArea.AddComponent<AimTouchProxy>();
+            proxy.aimJoystick = stick;
 
-            // Health icon
-            var icon = CreateText("Health_Icon", healthContainer.transform, "+", 28,
+            // Outer (base)
+            var outer = CreateUIElement("AimStick_Outer", canvas);
+            var outerRect = outer.GetComponent<RectTransform>();
+            outerRect.anchorMin = outerRect.anchorMax = new Vector2(1f, 0f);
+            outerRect.pivot = new Vector2(0.5f, 0.5f);
+            outerRect.anchoredPosition = new Vector2(-140f, 140f);
+            outerRect.sizeDelta = new Vector2(joystickBaseSize, joystickBaseSize);
+            var outerImg = outer.AddComponent<Image>();
+            outerImg.color = aimOuterColor;
+            outerImg.raycastTarget = false;
+            AssignCircleSprite(outerImg);
+
+            // Inner (knob)
+            float knobSize = joystickBaseSize * joystickKnobRatio;
+            var inner = CreateUIElement("AimStick_Inner", outer.transform);
+            var innerRect = inner.GetComponent<RectTransform>();
+            innerRect.anchoredPosition = Vector2.zero;
+            innerRect.sizeDelta = new Vector2(knobSize, knobSize);
+            var innerImg = inner.AddComponent<Image>();
+            innerImg.color = aimInnerColor;
+            innerImg.raycastTarget = false;
+            AssignCircleSprite(innerImg);
+
+            // Wire serialized fields
+            SetPrivateField(stick, "_baseRect", outerRect);
+            SetPrivateField(stick, "_knobRect", innerRect);
+            SetPrivateField(stick, "_baseImage", outerImg);
+            SetPrivateField(stick, "_knobImage", innerImg);
+            EditorUtility.SetDirty(stick);
+        }
+
+        // ====================================================================
+        // HUD
+        // ====================================================================
+
+        private void BuildAndWireHUD(Transform canvas, GameplayHUD hud)
+        {
+            // -- Health Bar --
+            var hContainer = CreatePanel("HealthBar_Container", canvas);
+            var hcr = hContainer.GetComponent<RectTransform>();
+            hcr.anchorMin = hcr.anchorMax = new Vector2(0f, 1f);
+            hcr.pivot = new Vector2(0f, 1f);
+            hcr.anchoredPosition = new Vector2(24f, -24f);
+            hcr.sizeDelta = new Vector2(300f, 50f);
+            hContainer.GetComponent<Image>().color = Color.clear;
+
+            var icon = CreateTextElement("Health_Icon", hContainer.transform, "+", 28,
                 new Color(0.9f, 0.3f, 0.3f, 1f), TextAnchor.MiddleCenter);
-            var iconR = Rect(icon);
-            iconR.anchorMin = new Vector2(0f, 0f);
-            iconR.anchorMax = new Vector2(0f, 1f);
-            iconR.pivot = new Vector2(0f, 0.5f);
-            iconR.anchoredPosition = Vector2.zero;
-            iconR.sizeDelta = new Vector2(30f, 0f);
+            var ir = icon.GetComponent<RectTransform>();
+            ir.anchorMin = new Vector2(0f, 0f); ir.anchorMax = new Vector2(0f, 1f);
+            ir.pivot = new Vector2(0f, 0.5f);
+            ir.anchoredPosition = Vector2.zero; ir.sizeDelta = new Vector2(30f, 0f);
 
-            // Health bg
-            var hBg = CreatePanel("HealthBar_Bg", healthContainer.transform,
-                new Color(0, 0, 0, 0.6f));
-            var hBgR = Rect(hBg);
-            hBgR.anchorMin = new Vector2(0f, 0.15f);
-            hBgR.anchorMax = new Vector2(1f, 0.85f);
-            hBgR.offsetMin = new Vector2(36f, 0f);
-            hBgR.offsetMax = new Vector2(-8f, 0f);
+            var hBg = CreatePanel("HealthBar_Bg", hContainer.transform);
+            var hbr = hBg.GetComponent<RectTransform>();
+            hbr.anchorMin = new Vector2(0f, 0.15f); hbr.anchorMax = new Vector2(1f, 0.85f);
+            hbr.offsetMin = new Vector2(36f, 0f); hbr.offsetMax = new Vector2(-8f, 0f);
+            hBg.GetComponent<Image>().color = new Color(0, 0, 0, 0.6f);
 
-            // Health fill
-            var hFill = CreatePanel("HealthBar_Fill", hBg.transform,
-                new Color(0.2f, 0.9f, 0.4f, 1f));
-            var hFillR = Rect(hFill);
-            hFillR.anchorMin = Vector2.zero;
-            hFillR.anchorMax = Vector2.one;
-            hFillR.offsetMin = new Vector2(3f, 3f);
-            hFillR.offsetMax = new Vector2(-3f, -3f);
+            var hFill = CreatePanel("HealthBar_Fill", hBg.transform);
+            var hfr = hFill.GetComponent<RectTransform>();
+            hfr.anchorMin = Vector2.zero; hfr.anchorMax = Vector2.one;
+            hfr.offsetMin = new Vector2(3f, 3f); hfr.offsetMax = new Vector2(-3f, -3f);
+            var hFillImg = hFill.GetComponent<Image>();
+            hFillImg.color = healthFullColor;
 
-            // Health text
-            CreateText("Health_Text", hBg.transform, "100%", 18,
-                Color.white, TextAnchor.MiddleCenter, true);
+            var hTxt = CreateTextElement("Health_Text", hBg.transform, "100%", 18,
+                Color.white, TextAnchor.MiddleCenter);
+            var htr = hTxt.GetComponent<RectTransform>();
+            htr.anchorMin = Vector2.zero; htr.anchorMax = Vector2.one;
+            htr.offsetMin = htr.offsetMax = Vector2.zero;
 
-            // --- Ammo Counter (top-right) ---
-            var ammoContainer = CreatePanel("Ammo_Container", canvasT,
-                new Color(0, 0, 0, 0.4f));
-            var acRect = Rect(ammoContainer);
-            acRect.anchorMin = new Vector2(1f, 1f);
-            acRect.anchorMax = new Vector2(1f, 1f);
-            acRect.pivot = new Vector2(1f, 1f);
-            acRect.anchoredPosition = new Vector2(-24f, -24f);
-            acRect.sizeDelta = new Vector2(180f, 50f);
+            // -- Ammo --
+            var aContainer = CreatePanel("Ammo_Container", canvas);
+            var acr = aContainer.GetComponent<RectTransform>();
+            acr.anchorMin = acr.anchorMax = new Vector2(1f, 1f);
+            acr.pivot = new Vector2(1f, 1f);
+            acr.anchoredPosition = new Vector2(-24f, -24f);
+            acr.sizeDelta = new Vector2(180f, 50f);
+            aContainer.GetComponent<Image>().color = new Color(0, 0, 0, 0.4f);
 
-            var ammoTxt = CreateText("Ammo_Text", ammoContainer.transform,
-                "30 / 30", 26, new Color(1f, 0.85f, 0.3f, 1f),
-                TextAnchor.MiddleCenter, true);
+            var aTxt = CreateTextElement("Ammo_Text", aContainer.transform, "30 / 30", 26,
+                ammoColor, TextAnchor.MiddleCenter);
+            var atr = aTxt.GetComponent<RectTransform>();
+            atr.anchorMin = Vector2.zero; atr.anchorMax = Vector2.one;
+            atr.offsetMin = new Vector2(8f, 0f); atr.offsetMax = new Vector2(-8f, 0f);
 
-            // --- Kill Counter (below health) ---
-            var killTxt = CreateText("Kill_Text", canvasT, "KILLS: 0", 20,
+            // -- Kill Counter --
+            var kTxt = CreateTextElement("Kill_Text", canvas, "KILLS: 0", 20,
                 new Color(1f, 0.4f, 0.4f, 0.9f), TextAnchor.MiddleLeft);
-            var killR = Rect(killTxt);
-            killR.anchorMin = new Vector2(0f, 1f);
-            killR.anchorMax = new Vector2(0f, 1f);
-            killR.pivot = new Vector2(0f, 1f);
-            killR.anchoredPosition = new Vector2(24f, -82f);
-            killR.sizeDelta = new Vector2(200f, 30f);
+            var ktr = kTxt.GetComponent<RectTransform>();
+            ktr.anchorMin = ktr.anchorMax = new Vector2(0f, 1f);
+            ktr.pivot = new Vector2(0f, 1f);
+            ktr.anchoredPosition = new Vector2(24f, -82f);
+            ktr.sizeDelta = new Vector2(200f, 30f);
 
-            // --- Room Progress (top-center) ---
-            var roomContainer = CreatePanel("Room_Container", canvasT,
-                new Color(0, 0, 0, 0.4f));
-            var rcRect = Rect(roomContainer);
-            rcRect.anchorMin = new Vector2(0.5f, 1f);
-            rcRect.anchorMax = new Vector2(0.5f, 1f);
-            rcRect.pivot = new Vector2(0.5f, 1f);
-            rcRect.anchoredPosition = new Vector2(0f, -24f);
-            rcRect.sizeDelta = new Vector2(260f, 44f);
+            // -- Room Progress --
+            var rContainer = CreatePanel("Room_Container", canvas);
+            var rcr = rContainer.GetComponent<RectTransform>();
+            rcr.anchorMin = rcr.anchorMax = new Vector2(0.5f, 1f);
+            rcr.pivot = new Vector2(0.5f, 1f);
+            rcr.anchoredPosition = new Vector2(0f, -24f);
+            rcr.sizeDelta = new Vector2(260f, 44f);
+            rContainer.GetComponent<Image>().color = new Color(0, 0, 0, 0.4f);
 
-            var roomTxt = CreateText("Room_Text", roomContainer.transform,
-                "ROOM 1 / 7", 18, Color.white, TextAnchor.MiddleCenter);
-            var roomTxtR = Rect(roomTxt);
-            roomTxtR.anchorMin = new Vector2(0f, 0.5f);
-            roomTxtR.anchorMax = new Vector2(1f, 1f);
-            roomTxtR.offsetMin = new Vector2(8f, 0f);
-            roomTxtR.offsetMax = new Vector2(-8f, 0f);
+            var rTxt = CreateTextElement("Room_Text", rContainer.transform, "ROOM 1 / 7", 18,
+                Color.white, TextAnchor.MiddleCenter);
+            var rtr = rTxt.GetComponent<RectTransform>();
+            rtr.anchorMin = new Vector2(0f, 0.5f); rtr.anchorMax = new Vector2(1f, 1f);
+            rtr.offsetMin = new Vector2(8f, 0f); rtr.offsetMax = new Vector2(-8f, 0f);
 
-            // Room progress bar bg
-            var rpBg = CreatePanel("RoomProgress_Bg", roomContainer.transform,
-                new Color(0.3f, 0.3f, 0.3f, 0.8f));
-            var rpBgR = Rect(rpBg);
-            rpBgR.anchorMin = new Vector2(0.05f, 0.1f);
-            rpBgR.anchorMax = new Vector2(0.95f, 0.4f);
-            rpBgR.offsetMin = Vector2.zero;
-            rpBgR.offsetMax = Vector2.zero;
+            var rBg = CreatePanel("RoomProgress_Bg", rContainer.transform);
+            var rbr = rBg.GetComponent<RectTransform>();
+            rbr.anchorMin = new Vector2(0.05f, 0.1f); rbr.anchorMax = new Vector2(0.95f, 0.4f);
+            rbr.offsetMin = rbr.offsetMax = Vector2.zero;
+            rBg.GetComponent<Image>().color = new Color(0.3f, 0.3f, 0.3f, 0.8f);
 
-            // Room progress fill
-            var rpFill = CreatePanel("RoomProgress_Fill", rpBg.transform,
-                new Color(0.3f, 0.8f, 1f, 0.9f));
-            var rpFillR = Rect(rpFill);
-            rpFillR.anchorMin = Vector2.zero;
-            rpFillR.anchorMax = new Vector2(0.5f, 1f);
-            rpFillR.offsetMin = Vector2.zero;
-            rpFillR.offsetMax = Vector2.zero;
+            var rFill = CreatePanel("RoomProgress_Fill", rBg.transform);
+            var rfr = rFill.GetComponent<RectTransform>();
+            rfr.anchorMin = Vector2.zero; rfr.anchorMax = new Vector2(0.14f, 1f);
+            rfr.offsetMin = rfr.offsetMax = Vector2.zero;
+            var rFillImg = rFill.GetComponent<Image>();
+            rFillImg.color = new Color(0.3f, 0.8f, 1f, 0.9f);
 
-            // --- Fire Button (bottom-right) ---
-            var fireBtn = CreatePanel("Fire_Button", canvasT,
-                new Color(0.95f, 0.25f, 0.25f, 0.6f));
-            var fbRect = Rect(fireBtn);
-            fbRect.anchorMin = new Vector2(1f, 0f);
-            fbRect.anchorMax = new Vector2(1f, 0f);
-            fbRect.pivot = new Vector2(1f, 0f);
-            fbRect.anchoredPosition = new Vector2(-80f, 100f);
-            fbRect.sizeDelta = new Vector2(160f, 160f);
-            ApplyCircleSprite(fireBtn.GetComponent<Image>());
-
-            var fireLabel = CreateText("Fire_Label", fireBtn.transform,
-                "\u2295", 48, Color.white, TextAnchor.MiddleCenter, true);
-
-            fireBtn.AddComponent<FireButtonHandler>();
+            // Wire to HUD
+            SetPrivateField(hud, "_healthBarBg", hbr);
+            SetPrivateField(hud, "_healthBarFill", hfr);
+            SetPrivateField(hud, "_healthFillImage", hFillImg);
+            SetPrivateField(hud, "_healthText", hTxt.GetComponent<Text>());
+            SetPrivateField(hud, "_ammoText", aTxt.GetComponent<Text>());
+            SetPrivateField(hud, "_killText", kTxt.GetComponent<Text>());
+            SetPrivateField(hud, "_roomText", rTxt.GetComponent<Text>());
+            SetPrivateField(hud, "_roomProgressBg", rbr);
+            SetPrivateField(hud, "_roomProgressFill", rfr);
+            SetPrivateField(hud, "_roomFillImage", rFillImg);
+            EditorUtility.SetDirty(hud);
         }
 
         // ====================================================================
         // Defection Popup
         // ====================================================================
 
-        static void BuildDefectionPopupVisuals(Transform canvasT)
+        private void BuildAndWireDefectionPopup(Transform canvas, DefectionPopup popup)
         {
-            // Root
-            var root = CreateUI("DefectionPopup_Root", canvasT);
-            var rootR = Rect(root);
-            rootR.anchorMin = new Vector2(0.5f, 0.65f);
-            rootR.anchorMax = new Vector2(0.5f, 0.65f);
-            rootR.pivot = new Vector2(0.5f, 0.5f);
-            rootR.sizeDelta = new Vector2(500f, 120f);
+            var root = CreateUIElement("DefectionPopup_Root", canvas);
+            var rr = root.GetComponent<RectTransform>();
+            rr.anchorMin = rr.anchorMax = new Vector2(0.5f, 0.65f);
+            rr.pivot = new Vector2(0.5f, 0.5f);
+            rr.sizeDelta = new Vector2(500f, 120f);
             var cg = root.AddComponent<CanvasGroup>();
-            cg.alpha = 1f;
-            cg.blocksRaycasts = false;
+            cg.alpha = 0f; cg.blocksRaycasts = false;
 
-            // Background
-            var bg = CreatePanel("Bg", root.transform,
-                new Color(0.05f, 0.15f, 0.3f, 0.9f));
-            StretchFull(Rect(bg));
+            var bg = CreatePanel("Bg", root.transform);
+            StretchFull(bg.GetComponent<RectTransform>());
+            bg.GetComponent<Image>().color = new Color(0.05f, 0.15f, 0.3f, 0.9f);
 
-            // Accent bar (left edge)
-            var bar = CreatePanel("AccentBar", root.transform,
-                new Color(0.3f, 0.9f, 0.5f, 1f));
-            var barR = Rect(bar);
-            barR.anchorMin = Vector2.zero;
-            barR.anchorMax = new Vector2(0f, 1f);
+            var bar = CreatePanel("AccentBar", root.transform);
+            var barR = bar.GetComponent<RectTransform>();
+            barR.anchorMin = new Vector2(0f, 0f); barR.anchorMax = new Vector2(0f, 1f);
             barR.pivot = new Vector2(0f, 0.5f);
-            barR.anchoredPosition = Vector2.zero;
-            barR.sizeDelta = new Vector2(6f, 0f);
+            barR.anchoredPosition = Vector2.zero; barR.sizeDelta = new Vector2(6f, 0f);
+            var accentCol = new Color(0.3f, 0.9f, 0.5f, 1f);
+            bar.GetComponent<Image>().color = accentCol;
 
-            // Title
-            var title = CreateText("Title", root.transform,
-                "\u2691 DEFECTION", 16, new Color(0.3f, 0.9f, 0.5f, 1f),
-                TextAnchor.MiddleLeft);
-            var titleR = Rect(title);
-            titleR.anchorMin = new Vector2(0f, 0.65f);
-            titleR.anchorMax = new Vector2(1f, 1f);
-            titleR.offsetMin = new Vector2(20f, 0f);
-            titleR.offsetMax = new Vector2(-12f, -8f);
+            var title = CreateTextElement("Title", root.transform, "⚑ DEFECTION", 16,
+                accentCol, TextAnchor.MiddleLeft);
+            var tr = title.GetComponent<RectTransform>();
+            tr.anchorMin = new Vector2(0f, 0.65f); tr.anchorMax = new Vector2(1f, 1f);
+            tr.offsetMin = new Vector2(20f, 0f); tr.offsetMax = new Vector2(-12f, -8f);
 
-            // NPC Name
-            var nameTxt = CreateText("NPCName", root.transform,
-                "NPC-04 has joined your side", 22,
-                new Color(0.9f, 0.95f, 1f, 1f), TextAnchor.MiddleLeft);
+            var nameTxt = CreateTextElement("NPCName", root.transform,
+                "NPC-04 has joined your side", 22, new Color(0.9f, 0.95f, 1f, 1f), TextAnchor.MiddleLeft);
+            var nr = nameTxt.GetComponent<RectTransform>();
+            nr.anchorMin = new Vector2(0f, 0.25f); nr.anchorMax = new Vector2(1f, 0.7f);
+            nr.offsetMin = new Vector2(20f, 0f); nr.offsetMax = new Vector2(-12f, 0f);
             nameTxt.GetComponent<Text>().fontStyle = FontStyle.Bold;
-            var nameR = Rect(nameTxt);
-            nameR.anchorMin = new Vector2(0f, 0.25f);
-            nameR.anchorMax = new Vector2(1f, 0.7f);
-            nameR.offsetMin = new Vector2(20f, 0f);
-            nameR.offsetMax = new Vector2(-12f, 0f);
 
-            // Subtitle
-            var sub = CreateText("Subtitle", root.transform,
+            var sub = CreateTextElement("Subtitle", root.transform,
                 "They will fight alongside you", 14,
                 new Color(0.6f, 0.7f, 0.8f, 0.9f), TextAnchor.MiddleLeft);
-            var subR = Rect(sub);
-            subR.anchorMin = new Vector2(0f, 0f);
-            subR.anchorMax = new Vector2(1f, 0.3f);
-            subR.offsetMin = new Vector2(20f, 6f);
-            subR.offsetMax = new Vector2(-12f, 0f);
+            var sr = sub.GetComponent<RectTransform>();
+            sr.anchorMin = new Vector2(0f, 0f); sr.anchorMax = new Vector2(1f, 0.3f);
+            sr.offsetMin = new Vector2(20f, 6f); sr.offsetMax = new Vector2(-12f, 0f);
 
             root.SetActive(false);
+
+            SetPrivateField(popup, "_popupRoot", root);
+            SetPrivateField(popup, "_popupRect", rr);
+            SetPrivateField(popup, "_canvasGroup", cg);
+            SetPrivateField(popup, "_titleText", title.GetComponent<Text>());
+            SetPrivateField(popup, "_nameText", nameTxt.GetComponent<Text>());
+            SetPrivateField(popup, "_subtitleText", sub.GetComponent<Text>());
+            SetPrivateField(popup, "_accentBar", bar.GetComponent<Image>());
+            EditorUtility.SetDirty(popup);
         }
 
         // ====================================================================
-        // Run Summary Screen
+        // Run Summary (simplified — hidden root with continue button)
         // ====================================================================
 
-        static void BuildRunSummaryVisuals(Transform canvasT)
+        private void BuildAndWireRunSummary(Transform canvas, RunSummaryScreen summary)
         {
-            // Full-screen root
-            var root = CreateUI("RunSummary_Root", canvasT);
-            StretchFull(Rect(root));
-            var bgImg = root.AddComponent<Image>();
-            bgImg.color = new Color(0.02f, 0.04f, 0.08f, 0.95f);
-            bgImg.raycastTarget = true;
+            var root = CreatePanel("RunSummary_Root", canvas);
+            StretchFull(root.GetComponent<RectTransform>());
+            root.GetComponent<Image>().color = new Color(0.02f, 0.04f, 0.08f, 0.95f);
             var cg = root.AddComponent<CanvasGroup>();
             cg.alpha = 1f;
 
-            // Content panel
-            var scroll = CreateUI("Scroll", root.transform);
-            var scrollR = Rect(scroll);
-            scrollR.anchorMin = new Vector2(0.08f, 0.05f);
-            scrollR.anchorMax = new Vector2(0.92f, 0.95f);
-            scrollR.offsetMin = Vector2.zero;
-            scrollR.offsetMax = Vector2.zero;
-
-            Color hdrCol = new(0.3f, 0.85f, 1f, 1f);
-            Color statCol = new(0.85f, 0.9f, 0.95f, 1f);
-            Color xpCol = new(1f, 0.85f, 0.2f, 1f);
-            Color accentCol = new(0.3f, 0.95f, 0.5f, 1f);
-            Color dimCol = new(0.5f, 0.55f, 0.65f, 0.9f);
-
-            float y = 0f;
-            float sp = 8f;
-
-            AddSummaryText(scroll.transform, ref y, "RUN COMPLETE", 32, hdrCol, FontStyle.Bold);
-            y += sp;
-            AddDivider(scroll.transform, ref y);
-            y += sp * 2;
-
-            AddSummaryText(scroll.transform, ref y, "STATS", 16, dimCol, FontStyle.Bold);
-            y += 4f;
-            AddSummaryText(scroll.transform, ref y, "Rooms Cleared:  0 / 0", 20, statCol);
-            AddSummaryText(scroll.transform, ref y, "Kills:  0", 20, statCol);
-            AddSummaryText(scroll.transform, ref y, "Accuracy:  0%", 20, statCol);
-            AddSummaryText(scroll.transform, ref y, "Time:  0:00", 20, statCol);
-            y += sp * 2;
-
-            AddDivider(scroll.transform, ref y);
-            y += sp * 2;
-
-            AddSummaryText(scroll.transform, ref y, "REWARDS", 16, dimCol, FontStyle.Bold);
-            y += 4f;
-            AddSummaryText(scroll.transform, ref y, "Base XP:   +0", 20, xpCol);
-            AddSummaryText(scroll.transform, ref y, "Bonus XP:  +0", 20, xpCol);
-            AddSummaryText(scroll.transform, ref y, "", 16, accentCol, FontStyle.Italic);
-            y += 4f;
-            AddSummaryText(scroll.transform, ref y, "TOTAL:  0 XP", 26, xpCol, FontStyle.Bold);
-            y += sp * 2;
-
-            AddDivider(scroll.transform, ref y);
-            y += sp * 2;
-
-            AddSummaryText(scroll.transform, ref y, "DIRECTOR NOTES", 16, dimCol, FontStyle.Bold);
-            y += 4f;
-            var dirTxt = AddSummaryText(scroll.transform, ref y, "No adjustments.", 17, statCol);
-            Rect(dirTxt).sizeDelta = new Vector2(0f, 60f);
-            y += 40f;
-
-            AddSummaryText(scroll.transform, ref y, "", 18, accentCol, FontStyle.Italic);
-            y += sp * 2;
-
-            // Continue button
-            var btnObj = CreatePanel("ContinueBtn", scroll.transform,
-                new Color(0.2f, 0.6f, 1f, 0.9f));
-            var btnR = Rect(btnObj);
-            btnR.anchorMin = new Vector2(0.2f, 1f);
-            btnR.anchorMax = new Vector2(0.8f, 1f);
-            btnR.pivot = new Vector2(0.5f, 1f);
-            btnR.anchoredPosition = new Vector2(0f, -y);
-            btnR.sizeDelta = new Vector2(0f, 60f);
-            btnObj.AddComponent<Button>();
-
-            var btnLabel = CreateText("Label", btnObj.transform,
-                "NEXT RUN \u25B6", 24, Color.white, TextAnchor.MiddleCenter, true);
-            btnLabel.GetComponent<Text>().fontStyle = FontStyle.Bold;
-
+            // The RunSummaryScreen script builds its own rich content layout.
+            // We wire just the root so it knows to skip re-creating it.
+            // The script's BuildUI() will populate content inside _root.
             root.SetActive(false);
+
+            SetPrivateField(summary, "_root", root);
+            SetPrivateField(summary, "_canvasGroup", cg);
+            EditorUtility.SetDirty(summary);
         }
 
         // ====================================================================
-        // Helpers
+        // Utility
         // ====================================================================
 
-        static GameObject CreateUI(string name, Transform parent)
+        private GameObject CreateCanvas()
+        {
+            var go = new GameObject("THRESHOLD_Canvas");
+            Undo.RegisterCreatedObjectUndo(go, "Create Canvas");
+            var c = go.AddComponent<Canvas>();
+            c.renderMode = RenderMode.ScreenSpaceOverlay;
+            c.sortingOrder = 100;
+            var s = go.AddComponent<CanvasScaler>();
+            s.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            s.referenceResolution = refResolution;
+            s.matchWidthOrHeight = 0.5f;
+            go.AddComponent<GraphicRaycaster>();
+            return go;
+        }
+
+        private void EnsureEventSystem()
+        {
+            if (FindAnyObjectByType<EventSystem>() != null) return;
+            var go = new GameObject("EventSystem");
+            Undo.RegisterCreatedObjectUndo(go, "Create EventSystem");
+            go.AddComponent<EventSystem>();
+            go.AddComponent<StandaloneInputModule>();
+        }
+
+        private GameObject CreateUIElement(string name, Transform parent)
         {
             var go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
+            Undo.RegisterCreatedObjectUndo(go, name);
             return go;
         }
 
-        static GameObject CreatePanel(string name, Transform parent, Color col)
+        private GameObject CreatePanel(string name, Transform parent)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
             go.transform.SetParent(parent, false);
-            go.GetComponent<Image>().color = col;
+            Undo.RegisterCreatedObjectUndo(go, name);
             return go;
         }
 
-        static GameObject CreateText(string name, Transform parent, string text,
-            int fontSize, Color color, TextAnchor anchor, bool stretch = false)
+        private GameObject CreateTextElement(string name, Transform parent, string text,
+            int fontSize, Color color, TextAnchor anchor)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Text));
             go.transform.SetParent(parent, false);
@@ -469,71 +486,48 @@ namespace Threshold.UI.Editor
             t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             t.raycastTarget = false;
             t.horizontalOverflow = HorizontalWrapMode.Overflow;
-            if (stretch) StretchFull(Rect(go));
+            Undo.RegisterCreatedObjectUndo(go, name);
             return go;
         }
 
-        static GameObject AddSummaryText(Transform parent, ref float y,
-            string content, int fontSize, Color color,
-            FontStyle style = FontStyle.Normal)
+        private void StretchFull(RectTransform rt)
         {
-            float h = fontSize + 12f;
-            var go = CreateText("Text", parent, content, fontSize, color,
-                TextAnchor.MiddleLeft);
-            var t = go.GetComponent<Text>();
-            t.fontStyle = style;
-            t.horizontalOverflow = HorizontalWrapMode.Wrap;
-            t.verticalOverflow = VerticalWrapMode.Overflow;
-
-            var r = Rect(go);
-            r.anchorMin = new Vector2(0f, 1f);
-            r.anchorMax = new Vector2(1f, 1f);
-            r.pivot = new Vector2(0.5f, 1f);
-            r.anchoredPosition = new Vector2(0f, -y);
-            r.sizeDelta = new Vector2(0f, h);
-            y += h;
-            return go;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
         }
 
-        static void AddDivider(Transform parent, ref float y)
+        private void AssignCircleSprite(Image img)
         {
-            var go = CreatePanel("Divider", parent,
-                new Color(0.3f, 0.4f, 0.5f, 0.5f));
-            var r = Rect(go);
-            r.anchorMin = new Vector2(0f, 1f);
-            r.anchorMax = new Vector2(1f, 1f);
-            r.pivot = new Vector2(0.5f, 1f);
-            r.anchoredPosition = new Vector2(0f, -y);
-            r.sizeDelta = new Vector2(0f, 2f);
-            y += 2f;
-        }
-
-        static RectTransform Rect(GameObject go) => go.GetComponent<RectTransform>();
-
-        static void StretchFull(RectTransform r)
-        {
-            r.anchorMin = Vector2.zero;
-            r.anchorMax = Vector2.one;
-            r.offsetMin = Vector2.zero;
-            r.offsetMax = Vector2.zero;
-        }
-
-        static void ApplyCircleSprite(Image img)
-        {
-            int sz = 128;
-            var tex = new Texture2D(sz, sz, TextureFormat.RGBA32, false);
-            float c = sz / 2f;
-            float rad = c - 1f;
-            for (int py = 0; py < sz; py++)
-                for (int px = 0; px < sz; px++)
+            int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            float center = size / 2f;
+            float radius = center - 1f;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
                 {
-                    float d = Vector2.Distance(new Vector2(px, py), new Vector2(c, c));
-                    float a = Mathf.Clamp01((rad - d) * 2f);
-                    tex.SetPixel(px, py, new Color(1f, 1f, 1f, a));
+                    float dist = Vector2.Distance(new Vector2(x, y), new Vector2(center, center));
+                    float alpha = Mathf.Clamp01((radius - dist) * 2f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
                 }
             tex.Apply();
-            img.sprite = Sprite.Create(tex, new UnityEngine.Rect(0, 0, sz, sz),
-                new Vector2(0.5f, 0.5f));
+            img.sprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
+        }
+
+        /// <summary>Sets a private [SerializeField] via SerializedObject for proper Undo + persistence.</summary>
+        private void SetPrivateField(Component target, string fieldName, Object value)
+        {
+            var so = new SerializedObject(target);
+            var prop = so.FindProperty(fieldName);
+            if (prop != null)
+            {
+                prop.objectReferenceValue = value;
+                so.ApplyModifiedProperties();
+            }
+            else
+            {
+                Debug.LogWarning($"[UIBuilder] Could not find field '{fieldName}' on {target.GetType().Name}");
+            }
         }
     }
 }

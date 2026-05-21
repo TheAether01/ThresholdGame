@@ -47,8 +47,8 @@ namespace Threshold.UI
         /// <summary>Fired when the fire button is released.</summary>
         public event Action OnFireReleased;
 
-        /// <summary>True while fire button is held down.</summary>
-        public bool IsFiring { get; private set; }
+        /// <summary>True while fire button is held down (or AimJoystick is active).</summary>
+        public bool IsFiring => (AimJoystick.Instance != null && AimJoystick.Instance.IsAiming) || _isFiringButton;
 
         // ====================================================================
         // Singleton
@@ -57,32 +57,33 @@ namespace Threshold.UI
         public static GameplayHUD Instance { get; private set; }
 
         // ====================================================================
-        // Internal References
+        // Internal References (serialized so editor tool can pre-assign)
         // ====================================================================
 
         private Canvas _canvas;
 
         // Health
-        private RectTransform _healthBarBg;
-        private RectTransform _healthBarFill;
-        private Image _healthFillImage;
-        private Text _healthText;
+        [SerializeField] private RectTransform _healthBarBg;
+        [SerializeField] private RectTransform _healthBarFill;
+        [SerializeField] private Image _healthFillImage;
+        [SerializeField] private Text _healthText;
 
         // Ammo
-        private Text _ammoText;
-        private Image _ammoIcon;
+        [SerializeField] private Text _ammoText;
+        [SerializeField] private Image _ammoIcon;
 
         // Kill counter
-        private Text _killText;
+        [SerializeField] private Text _killText;
 
         // Room progress
-        private Text _roomText;
-        private RectTransform _roomProgressBg;
-        private RectTransform _roomProgressFill;
-        private Image _roomFillImage;
+        [SerializeField] private Text _roomText;
+        [SerializeField] private RectTransform _roomProgressBg;
+        [SerializeField] private RectTransform _roomProgressFill;
+        [SerializeField] private Image _roomFillImage;
 
-        // Fire button
+        // Fire button (legacy — replaced by AimJoystick but kept for fallback)
         private Image _fireButtonImage;
+        private bool _isFiringButton;
 
         // Current values
         private float _currentHealth = 1f;
@@ -120,11 +121,16 @@ namespace Threshold.UI
         private void BuildUI()
         {
             _canvas = GetOrCreateCanvas();
-            BuildHealthBar();
-            BuildAmmoCounter();
-            BuildKillCounter();
-            BuildRoomProgress();
-            BuildFireButton();
+
+            // Skip building elements that are already wired by editor
+            if (_healthBarFill == null) BuildHealthBar();
+            if (_ammoText == null) BuildAmmoCounter();
+            if (_killText == null) BuildKillCounter();
+            if (_roomText == null) BuildRoomProgress();
+
+            // Only build fire button if no AimJoystick exists
+            if (AimJoystick.Instance == null && FindAnyObjectByType<AimJoystick>() == null)
+                BuildFireButton();
         }
 
         private Canvas GetOrCreateCanvas()
@@ -406,14 +412,14 @@ namespace Threshold.UI
 
         internal void HandleFireDown()
         {
-            IsFiring = true;
+            _isFiringButton = true;
             _fireButtonImage.color = fireButtonPressedColor;
             OnFirePressed?.Invoke();
         }
 
         internal void HandleFireUp()
         {
-            IsFiring = false;
+            _isFiringButton = false;
             _fireButtonImage.color = fireButtonColor;
             OnFireReleased?.Invoke();
         }

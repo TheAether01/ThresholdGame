@@ -58,8 +58,8 @@ namespace Threshold.Agents
             this.systemPrompt = systemPrompt;
             this.gameStateJson = gameStateJson;
             this.model = model;
-            // Default timeout: 15s for Flash, 45s for Pro (49B Nemotron needs warm-up on free tier)
-            this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : (model == GeminiModel.Flash ? 15 : 45);
+            // Default timeout: 15s for Flash, 120s for Pro (49B Nemotron needs warm-up on free tier)
+            this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : (model == GeminiModel.Flash ? 15 : 120);
         }
     }
 

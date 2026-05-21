@@ -6,8 +6,9 @@
 // PlayerWeapon, and PlayerHealth state. Listens to events for one-shot
 // triggers (fire, reload, death) and updates blend parameters each frame.
 //
-// Validates that the assigned AnimatorController contains the expected
-// parameters at startup, and gracefully skips updates if they are missing.
+// Supports twin-stick controls: when aiming + moving in different
+// directions, uses MoveX/MoveY to drive a 2D directional blend tree
+// for walk+shoot animations (front, back, left, right).
 // ============================================================================
 
 using UnityEngine;
@@ -31,6 +32,8 @@ namespace Threshold.Player
         private static readonly int IsReloading     = Animator.StringToHash("IsReloading");
         private static readonly int DieTrigger      = Animator.StringToHash("Die");
         private static readonly int SpeedMultiplier = Animator.StringToHash("SpeedMultiplier");
+        private static readonly int MoveX           = Animator.StringToHash("MoveX");
+        private static readonly int MoveY           = Animator.StringToHash("MoveY");
 
         // ====================================================================
         // Configuration
@@ -68,6 +71,8 @@ namespace Threshold.Player
         private bool _hasIsReloading;
         private bool _hasDie;
         private bool _hasSpeedMultiplier;
+        private bool _hasMoveX;
+        private bool _hasMoveY;
         private bool _parametersValidated;
 
         // ====================================================================
@@ -136,29 +141,60 @@ namespace Threshold.Player
             }
 
             // Drive animation playback speed proportional to stick deflection.
-            // When the player barely tilts the stick, the run/walk animation
-            // plays slower so feet don't slide. At full stick → 1x speed.
+            // Exception: when firing + moving, keep speed at 1.0 so walk+shoot
+            // animations play at their natural pace (movement speed is already
+            // reduced by shootingSpeedMultiplier in PlayerController).
             if (_hasSpeedMultiplier)
             {
                 float multiplier = 1f;
-                if (normalizedSpeed > 0.01f)
+                bool firingAndMoving = _controller != null && _controller.IsAiming && _controller.IsMoving;
+                if (!firingAndMoving && normalizedSpeed > 0.01f)
                 {
-                    // Map [0..1] velocity → [minAnimSpeed..1] playback rate
                     multiplier = Mathf.Lerp(minAnimSpeed, 1f, normalizedSpeed);
                 }
                 animator.SetFloat(SpeedMultiplier, multiplier);
             }
 
-            // IsFiring is true while fire button is held AND weapon is actively shooting
+            // IsFiring is true while aim stick / mouse-aim is active AND weapon can shoot
             if (_hasIsFiring)
             {
                 bool firing = false;
                 if (_weapon != null && !_weapon.IsReloading)
                 {
+                    // Check touch input
                     var uiManager = UI.ThresholdUIManager.Instance;
-                    firing = uiManager != null && uiManager.IsFireHeld();
+                    if (uiManager != null && uiManager.IsFireHeld())
+                        firing = true;
+                    // PC fallback: PlayerController.IsAiming covers mouse right-click
+                    if (!firing && _controller != null && _controller.IsAiming)
+                        firing = true;
                 }
                 animator.SetBool(IsFiring, firing);
+            }
+
+            // Directional walk+shoot blending (MoveX, MoveY)
+            // When moving and aiming in different directions, we compute
+            // the movement direction relative to facing and drive the blend tree.
+            if (_hasMoveX && _hasMoveY && _controller != null)
+            {
+                float moveX = 0f;
+                float moveY = 0f;
+
+                if (_controller.IsMoving && _controller.IsAiming)
+                {
+                    // Convert relative angle to X/Y blend values
+                    float angle = _controller.MoveAngleRelativeToFacing * Mathf.Deg2Rad;
+                    moveX = Mathf.Sin(angle);   // +right, -left
+                    moveY = Mathf.Cos(angle);   // +forward, -backward
+                }
+                else if (_controller.IsMoving)
+                {
+                    // Moving without aiming — always "forward"
+                    moveY = 1f;
+                }
+
+                animator.SetFloat(MoveX, moveX, 0.1f, Time.deltaTime);
+                animator.SetFloat(MoveY, moveY, 0.1f, Time.deltaTime);
             }
         }
 
@@ -182,6 +218,8 @@ namespace Threshold.Player
                 _hasIsFiring = false;
                 _hasIsReloading = false;
                 _hasDie = false;
+                _hasMoveX = false;
+                _hasMoveY = false;
                 return;
             }
 
@@ -191,6 +229,8 @@ namespace Threshold.Player
             _hasIsReloading = false;
             _hasDie = false;
             _hasSpeedMultiplier = false;
+            _hasMoveX = false;
+            _hasMoveY = false;
 
             foreach (var param in animator.parameters)
             {
@@ -200,9 +240,12 @@ namespace Threshold.Player
                 else if (hash == IsReloading)      _hasIsReloading = true;
                 else if (hash == DieTrigger)        _hasDie = true;
                 else if (hash == SpeedMultiplier)   _hasSpeedMultiplier = true;
+                else if (hash == MoveX)             _hasMoveX = true;
+                else if (hash == MoveY)             _hasMoveY = true;
             }
 
-            bool allPresent = _hasSpeed && _hasIsFiring && _hasIsReloading && _hasDie && _hasSpeedMultiplier;
+            bool allPresent = _hasSpeed && _hasIsFiring && _hasIsReloading && _hasDie
+                              && _hasSpeedMultiplier && _hasMoveX && _hasMoveY;
 
             if (!allPresent)
             {
@@ -212,6 +255,8 @@ namespace Threshold.Player
                 if (!_hasIsReloading) missing += "IsReloading, ";
                 if (!_hasDie) missing += "Die, ";
                 if (!_hasSpeedMultiplier) missing += "SpeedMultiplier, ";
+                if (!_hasMoveX) missing += "MoveX, ";
+                if (!_hasMoveY) missing += "MoveY, ";
                 missing = missing.TrimEnd(',', ' ');
 
                 Debug.LogWarning($"[PlayerAnimator] AnimatorController is missing parameters: [{missing}]. " +
@@ -273,6 +318,8 @@ namespace Threshold.Player
                 if (_hasSpeed)       animator.SetFloat(Speed, 0f);
                 if (_hasIsFiring)    animator.SetBool(IsFiring, false);
                 if (_hasIsReloading) animator.SetBool(IsReloading, false);
+                if (_hasMoveX)       animator.SetFloat(MoveX, 0f);
+                if (_hasMoveY)       animator.SetFloat(MoveY, 0f);
                 animator.Rebind();
                 animator.Update(0f);
             }

@@ -67,14 +67,14 @@ namespace Threshold.UI
         public static VirtualJoystick Instance { get; private set; }
 
         // ====================================================================
-        // Internal References
+        // Internal References (serialized so editor tool can pre-assign)
         // ====================================================================
 
         private Canvas _canvas;
-        private RectTransform _baseRect;
-        private RectTransform _knobRect;
-        private Image _baseImage;
-        private Image _knobImage;
+        [SerializeField] private RectTransform _baseRect;
+        [SerializeField] private RectTransform _knobRect;
+        [SerializeField] private Image _baseImage;
+        [SerializeField] private Image _knobImage;
         private Vector2 _inputOrigin;
 
         // ====================================================================
@@ -103,6 +103,9 @@ namespace Threshold.UI
 
         private void BuildUI()
         {
+            // Skip if editor already built the UI and wired references
+            if (_baseRect != null && _knobRect != null) return;
+
             // --- Canvas (find existing or create) ---
             _canvas = FindAnyObjectByType<Canvas>();
             if (_canvas == null)

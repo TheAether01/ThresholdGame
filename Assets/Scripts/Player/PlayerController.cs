@@ -1,10 +1,11 @@
 // ============================================================================
-// PlayerController.cs — Core player movement & rotation controller
+// PlayerController.cs — Twin-stick player movement & rotation controller
 // THRESHOLD — Google Antigravity Mobile Game Challenge 2026
 //
-// Reads VirtualJoystick input via ThresholdUIManager, drives Rigidbody
-// movement on the XZ plane, and rotates the player to face the joystick
-// direction (which also controls weapon aim direction).
+// Left stick (VirtualJoystick): movement on XZ plane
+// Right stick (AimJoystick): aim direction + auto-fire
+// When aiming, player faces aim direction independently of movement.
+// When not aiming, player faces movement direction.
 // ============================================================================
 
 using UnityEngine;
@@ -37,6 +38,12 @@ namespace Threshold.Player
         [Tooltip("How fast the player rotates to face joystick direction (degrees/sec).")]
         [SerializeField] private float rotationSpeed = 720f;
 
+        [Header("Shooting Movement")]
+        [Tooltip("Movement speed multiplier when aiming/shooting (0.4 = 40% of run speed). " +
+                 "Walk+Shoot animations are slower than run, so movement must slow down to match.")]
+        [Range(0.2f, 1f)]
+        [SerializeField] private float shootingSpeedMultiplier = 0.5f;
+
         [Tooltip("If true, player keeps facing last joystick direction when released.")]
         [SerializeField] private bool retainFacingDirection = true;
 
@@ -48,14 +55,27 @@ namespace Threshold.Player
         // State
         // ====================================================================
 
-        /// <summary>True if the player is currently moving (joystick active).</summary>
+        /// <summary>True if the player is currently moving (left stick active).</summary>
         public bool IsMoving { get; private set; }
+
+        /// <summary>True if the player is currently aiming (right stick active).</summary>
+        public bool IsAiming { get; private set; }
 
         /// <summary>Current movement velocity magnitude (0–moveSpeed).</summary>
         public float CurrentSpeed => _rb.linearVelocity.magnitude;
 
-        /// <summary>Last non-zero joystick direction (for aim retention).</summary>
+        /// <summary>Direction the player is facing (aim or movement).</summary>
         public Vector3 FacingDirection { get; private set; } = Vector3.forward;
+
+        /// <summary>Current movement direction from left stick (world XZ).</summary>
+        public Vector3 MoveDirection { get; private set; }
+
+        /// <summary>
+        /// Angle between movement direction and facing direction in degrees.
+        /// 0 = forward, 180 = backward, +90 = right strafe, -90 = left strafe.
+        /// Used by PlayerAnimator for directional walk+shoot blending.
+        /// </summary>
+        public float MoveAngleRelativeToFacing { get; private set; }
 
         // ====================================================================
         // Singleton
@@ -69,6 +89,7 @@ namespace Threshold.Player
 
         private Rigidbody _rb;
         private PlayerHealth _health;
+        private PlayerWeapon _weapon;
         private Vector3 _smoothVelocity;
         private Vector3 _inputVelocity;
         private NPC.NPCBrainController _cachedBrain;
@@ -84,6 +105,7 @@ namespace Threshold.Player
 
             _rb = GetComponent<Rigidbody>();
             _health = GetComponent<PlayerHealth>();
+            _weapon = GetComponent<PlayerWeapon>();
 
             // Configure Rigidbody for top-down
             _rb.useGravity = true;
@@ -114,6 +136,16 @@ namespace Threshold.Player
                 return;
             }
 
+            // Freeze movement while reloading (no walk+reload animation)
+            if (_weapon != null && _weapon.IsReloading)
+            {
+                _rb.linearVelocity = new Vector3(0f, _rb.linearVelocity.y, 0f);
+                _inputVelocity = Vector3.zero;
+                _smoothVelocity = Vector3.zero;
+                IsMoving = false;
+                return;
+            }
+
             HandleMovement();
             HandleRotation();
         }
@@ -124,7 +156,7 @@ namespace Threshold.Player
 
         private void HandleMovement()
         {
-            // Get joystick input from UI manager
+            // Get MOVEMENT input from LEFT stick
             Vector3 moveInput = Vector3.zero;
             var uiManager = UI.ThresholdUIManager.Instance;
             if (uiManager != null)
@@ -132,10 +164,24 @@ namespace Threshold.Player
                 moveInput = uiManager.GetMoveInput(); // Returns (x, 0, z) normalized
             }
 
+            // PC fallback: WASD / Arrow keys (when joystick has no input)
+            if (moveInput.sqrMagnitude < 0.01f)
+            {
+                float h = 0f, v = 0f;
+                if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))    v += 1f;
+                if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))  v -= 1f;
+                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))  h -= 1f;
+                if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) h += 1f;
+                moveInput = new Vector3(h, 0f, v).normalized;
+            }
+
             IsMoving = moveInput.sqrMagnitude > 0.01f;
+            MoveDirection = moveInput.normalized;
 
             // Calculate target velocity on XZ plane
-            Vector3 targetVelocity = moveInput * moveSpeed;
+            // Slow down when aiming — walk+shoot anims are slower than run
+            float speed = IsAiming ? moveSpeed * shootingSpeedMultiplier : moveSpeed;
+            Vector3 targetVelocity = moveInput * speed;
 
             // Smooth acceleration/deceleration
             _inputVelocity = Vector3.SmoothDamp(
@@ -149,34 +195,72 @@ namespace Threshold.Player
         }
 
         // ====================================================================
-        // Rotation (faces joystick direction = aim direction)
+        // Rotation — Twin-stick: aim stick overrides facing direction
         // ====================================================================
 
         private void HandleRotation()
         {
-            Vector3 moveInput = Vector3.zero;
             var uiManager = UI.ThresholdUIManager.Instance;
+
+            // Get AIM input from RIGHT stick
+            Vector3 aimInput = Vector3.zero;
             if (uiManager != null)
+                aimInput = uiManager.GetAimInput(); // Returns (x, 0, z)
+
+            // PC fallback: hold Right Mouse Button to aim toward mouse cursor
+            if (aimInput.sqrMagnitude < 0.01f && Input.GetMouseButton(1))
             {
-                moveInput = uiManager.GetMoveInput();
+                var ray = Camera.main != null ? Camera.main.ScreenPointToRay(Input.mousePosition) : default;
+                var plane = new Plane(Vector3.up, transform.position);
+                if (plane.Raycast(ray, out float dist))
+                {
+                    Vector3 worldPoint = ray.GetPoint(dist);
+                    Vector3 dir = worldPoint - transform.position;
+                    dir.y = 0f;
+                    if (dir.sqrMagnitude > 0.25f)
+                        aimInput = dir.normalized;
+                }
             }
 
-            if (moveInput.sqrMagnitude > 0.01f)
-            {
-                // Update facing direction
-                FacingDirection = moveInput.normalized;
+            IsAiming = aimInput.sqrMagnitude > 0.01f;
 
-                // Rotate toward joystick direction
+            Vector3 desiredFacing;
+
+            if (IsAiming)
+            {
+                // RIGHT STICK / MOUSE ACTIVE: face aim direction (independent of movement)
+                desiredFacing = aimInput.normalized;
+            }
+            else if (IsMoving)
+            {
+                // ONLY LEFT STICK: face movement direction (classic single-stick)
+                desiredFacing = MoveDirection;
+            }
+            else
+            {
+                // No input — retain current facing
+                desiredFacing = retainFacingDirection ? FacingDirection : transform.forward;
+            }
+
+            if (desiredFacing.sqrMagnitude > 0.01f)
+            {
+                FacingDirection = desiredFacing;
                 Quaternion targetRotation = Quaternion.LookRotation(FacingDirection, Vector3.up);
                 transform.rotation = Quaternion.RotateTowards(
                     transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
             }
-            else if (!retainFacingDirection)
+
+            // Calculate relative move angle for directional animations
+            if (IsMoving && FacingDirection.sqrMagnitude > 0.01f)
             {
-                // If not retaining, could snap back — but typically we retain
+                // Signed angle from facing to movement direction
+                // 0 = walking forward, 180 = backward, 90 = right, -90 = left
+                MoveAngleRelativeToFacing = Vector3.SignedAngle(FacingDirection, MoveDirection, Vector3.up);
             }
-            // If retainFacingDirection is true (default), player keeps facing
-            // the last joystick direction when released
+            else
+            {
+                MoveAngleRelativeToFacing = 0f;
+            }
         }
 
         // ====================================================================

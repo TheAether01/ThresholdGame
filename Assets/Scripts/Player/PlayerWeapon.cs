@@ -51,16 +51,27 @@ namespace Threshold.Player
         [Tooltip("Optional muzzle flash prefab (particle system).")]
         [SerializeField] private GameObject muzzleFlashPrefab;
 
-        [Header("Laser Tracer")]
+        [Header("Bullet Tracer")]
         [Tooltip("If true, spawns a ProjectileTracer on each shot.")]
         [SerializeField] private bool useTracers = true;
 
-        [Tooltip("Full laser beam appearance config — color, size, fade, glow.")]
+        [Tooltip("Bullet tracer appearance — color, size, length, speed, glow.")]
         [SerializeField] private TracerConfig tracerConfig = TracerConfig.Default;
 
         [Header("Layers")]
         [Tooltip("Layers the weapon can hit.")]
         [SerializeField] private LayerMask hitLayers = ~0; // Everything by default
+
+        [Header("Audio SFX")]
+        [Tooltip("Sound effect played on each shot.")]
+        [SerializeField] private AudioClip shootSFX;
+
+        [Tooltip("Sound effect played when reload starts.")]
+        [SerializeField] private AudioClip reloadSFX;
+
+        [Tooltip("Volume for weapon sound effects.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float sfxVolume = 0.6f;
 
         // ====================================================================
         // Events
@@ -103,6 +114,7 @@ namespace Threshold.Player
 
         private float _lastFireTime;
         private float _reloadEndTime;
+        private AudioSource _audioSource;
 
         // ====================================================================
         // Lifecycle
@@ -118,6 +130,13 @@ namespace Threshold.Player
         {
             CurrentAmmo = magazineSize;
             SyncAmmoHUD();
+
+            // Cache or add an AudioSource for weapon SFX
+            _audioSource = GetComponent<AudioSource>();
+            if (_audioSource == null)
+                _audioSource = gameObject.AddComponent<AudioSource>();
+            _audioSource.playOnAwake = false;
+            _audioSource.spatialBlend = 0f; // 2D sound for the player's own weapon
         }
 
         private void Update()
@@ -130,9 +149,17 @@ namespace Threshold.Player
                 return; // Can't fire while reloading
             }
 
-            // Check fire input
+            // Check fire input (touch aim stick OR PC right-click)
+            bool wantsFire = false;
             var uiManager = UI.ThresholdUIManager.Instance;
             if (uiManager != null && uiManager.IsFireHeld())
+                wantsFire = true;
+
+            // PC fallback: PlayerController.IsAiming covers mouse right-click
+            if (!wantsFire && PlayerController.Instance != null && PlayerController.Instance.IsAiming)
+                wantsFire = true;
+
+            if (wantsFire)
             {
                 TryFire();
             }
@@ -156,6 +183,10 @@ namespace Threshold.Player
             _reloadEndTime = Time.time + reloadTime;
             OnReloadStart?.Invoke();
 
+            // Play reload sound
+            if (reloadSFX != null && _audioSource != null)
+                _audioSource.PlayOneShot(reloadSFX, sfxVolume);
+
             Debug.Log("[PlayerWeapon] Reloading...");
         }
 
@@ -165,6 +196,15 @@ namespace Threshold.Player
             CurrentAmmo = magazineSize;
             IsReloading = false;
             SyncAmmoHUD();
+        }
+
+        /// <summary>Add ammo rounds (from pickups). Capped at magazine size.</summary>
+        public void AddAmmo(int amount)
+        {
+            if (amount <= 0) return;
+            CurrentAmmo = Mathf.Min(CurrentAmmo + amount, magazineSize);
+            SyncAmmoHUD();
+            Debug.Log($"[PlayerWeapon] Added {amount} ammo. Now: {CurrentAmmo}/{magazineSize}");
         }
 
         // ====================================================================
@@ -186,6 +226,10 @@ namespace Threshold.Player
 
             _lastFireTime = Time.time;
             CurrentAmmo--;
+
+            // Play shoot sound
+            if (shootSFX != null && _audioSource != null)
+                _audioSource.PlayOneShot(shootSFX, sfxVolume);
 
             // Muzzle position and direction
             Vector3 origin = muzzlePoint != null

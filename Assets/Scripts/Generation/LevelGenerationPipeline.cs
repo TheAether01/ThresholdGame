@@ -1,9 +1,12 @@
 // ============================================================================
-// LevelGenerationPipeline.cs — Async orchestrator: Director → LevelGen → QC → Build
+// LevelGenerationPipeline.cs — Async generation orchestrator
 // THRESHOLD — Google Antigravity Mobile Game Challenge 2026
 //
-// Coordinates the complete run-start flow with QC reject/regen retry loop.
-// Falls back to ProceduralRoomGenerator when Gemini fails 3 times.
+// Two generation modes (toggled via Inspector):
+//   AI_Full:  Director → LevelGen(Pro) → QC(Flash) → Build   (~100s, old)
+//   Hybrid:   Director → Local Spatial  → AI Populate(Flash) → Build  (~6s)
+//
+// Falls back to ProceduralRoomGenerator.GenerateFallback() when all else fails.
 // Every step is logged for hackathon submission evidence.
 // ============================================================================
 
@@ -19,6 +22,24 @@ using Debug = UnityEngine.Debug;
 
 namespace Threshold.Generation
 {
+    /// <summary>
+    /// Controls how the pipeline generates spatial layouts.
+    /// Toggle via Inspector on the LevelGenerationPipeline component.
+    /// </summary>
+    public enum GenerationMode
+    {
+        /// <summary>
+        /// Full AI pipeline: Director → LevelGen(Pro) → QC(Flash) → Build.
+        /// Slower (~100s) but the AI handles all spatial reasoning.
+        /// </summary>
+        AI_Full,
+
+        /// <summary>
+        /// Hybrid pipeline: Director → Local Spatial Gen → AI Populate(Flash) → Build.
+        /// Fast (~6s), spatial correctness guaranteed by code, AI assigns roles creatively.
+        /// </summary>
+        Hybrid
+    }
     /// <summary>
     /// Pipeline result returned to the game loop after a new run is built.
     /// </summary>
@@ -62,7 +83,11 @@ namespace Threshold.Generation
         [SerializeField] private LayoutHistoryManager historyManager;
 
         [Header("Pipeline Settings")]
-        [Tooltip("Max QC rejection attempts before falling back to local generator.")]
+        [Tooltip("AI_Full: LLM generates spatial layout (slow, ~100s).\n" +
+                 "Hybrid: Local code generates layout, AI assigns roles (fast, ~6s).")]
+        [SerializeField] private GenerationMode generationMode = GenerationMode.Hybrid;
+
+        [Tooltip("Max QC rejection attempts before falling back to local generator (AI_Full mode only).")]
         [SerializeField] private int maxQcRetries = 3;
 
         [Header("Debug")]
@@ -126,128 +151,185 @@ namespace Threshold.Generation
                 }
 
                 // ==============================================================
-                // STEP 2+3: Level Gen + QC retry loop
+                // BRANCH: AI_Full vs Hybrid generation mode
                 // ==============================================================
                 RoomGraphConfig acceptedConfig = null;
                 int attempt = 0;
-                string lastRejectionReason = null;
 
-                while (attempt < maxQcRetries && acceptedConfig == null)
+                if (generationMode == GenerationMode.Hybrid)
                 {
-                    attempt++;
-                    SetStatus($"Generating level (attempt {attempt}/{maxQcRetries})...");
+                    // ══════════════════════════════════════════════════════
+                    // HYBRID MODE: Local spatial gen + AI Populate agent
+                    // ══════════════════════════════════════════════════════
+                    attempt = 1;
 
-                    // STEP 2: Level Gen Agent
-                    var genStep = await RunLevelGenStep(result.difficulty, lastRejectionReason, attempt);
-                    steps.Add(genStep);
+                    // STEP 2: Local spatial generation (instant, always valid)
+                    SetStatus("Generating layout (local)...");
+                    var spatialTimer = Stopwatch.StartNew();
+                    int seed = Environment.TickCount;
+                    acceptedConfig = ProceduralRoomGenerator.GenerateLayout(result.difficulty, seed);
+                    spatialTimer.Stop();
 
-                    if (!genStep.success || !(genStep is LevelGenPipelineStep lgStep) || lgStep.config == null)
+                    bool spatialOk = acceptedConfig != null && acceptedConfig.rooms.Count > 0;
+                    steps.Add(new PipelineStep
                     {
-                        lastRejectionReason = "Level Gen Agent returned invalid config.";
-                        Debug.LogWarning($"[Pipeline] Level Gen attempt {attempt} failed: {lastRejectionReason}");
-                        continue;
-                    }
+                        stepName = "Spatial Generation (Local)",
+                        source = "local_procedural",
+                        success = spatialOk,
+                        durationMs = spatialTimer.ElapsedMilliseconds,
+                        details = spatialOk
+                            ? $"Generated {acceptedConfig.rooms.Count} rooms, seed={seed}"
+                            : "Local spatial generation returned null or empty."
+                    });
 
-                    // Auto-repair doorways before validation (compensates for
-                    // Flash model's weak spatial reasoning)
-                    int repairCount = ProceduralRoomGenerator.RepairDoorways(lgStep.config);
-
-                    // Auto-repair duplicate roles (e.g., 2 EXITs → demote extras to PACING)
-                    repairCount += RepairDuplicateRoles(lgStep.config);
-
-                    // Ensure spawnZones are initialized, then populate with enemies
-                    foreach (var room in lgStep.config.rooms)
+                    if (spatialOk)
                     {
-                        if (room.spawnZones == null)
-                            room.spawnZones = new System.Collections.Generic.List<SpawnZoneConfig>();
-                    }
-                    ProceduralRoomGenerator.PopulateSpawnZones(lgStep.config, result.difficulty);
+                        // STEP 3: AI Populate Agent (Flash, ~3s)
+                        SetStatus("AI populating rooms...");
+                        var populateStep = await RunPopulateStep(acceptedConfig, result.difficulty);
+                        steps.Add(populateStep);
 
-                    if (repairCount > 0)
-                    {
-                        steps.Add(new PipelineStep
-                        {
-                            stepName = $"Auto-Repair (attempt {attempt})",
-                            source = "local",
-                            success = true,
-                            durationMs = 0,
-                            details = $"Repaired {repairCount} issue(s), populated spawn zones."
-                        });
-                    }
+                        // Apply AI suggestions with local safety net
+                        ApplyPopulateResult(acceptedConfig, populateStep, result.difficulty);
 
-                    // Local validation first (fast, free)
-                    var localIssues = ProceduralRoomGenerator.Validate(lgStep.config);
-                    // Filter: only hard errors cause rejection (warnings are acceptable)
-                    var hardErrors = localIssues.FindAll(i => !i.StartsWith("Warning"));
-                    if (hardErrors.Count > 0)
-                    {
-                        lastRejectionReason = $"Local validation: {string.Join("; ", hardErrors)}";
-                        steps.Add(new PipelineStep
-                        {
-                            stepName = $"Local Validation (attempt {attempt})",
-                            source = "local",
-                            success = false,
-                            durationMs = 0,
-                            details = lastRejectionReason
-                        });
-                        Debug.LogWarning($"[Pipeline] Local validation failed: {lastRejectionReason}");
-                        continue;
-                    }
-
-                    // STEP 3: QC Agent
-                    SetStatus($"QC validation (attempt {attempt})...");
-                    var qcStep = await RunQcStep(lgStep.config, attempt);
-                    steps.Add(qcStep);
-
-                    if (qcStep.success)
-                    {
-                        acceptedConfig = lgStep.config;
+                        result.generationSource = "hybrid";
                     }
                     else
                     {
-                        lastRejectionReason = qcStep.details;
-                        Debug.LogWarning($"[Pipeline] QC rejected attempt {attempt}: {lastRejectionReason}");
+                        // Extremely unlikely — local gen should never fail
+                        acceptedConfig = ProceduralRoomGenerator.GenerateFallback(result.difficulty);
+                        result.generationSource = "fallback";
+                        steps.Add(new PipelineStep
+                        {
+                            stepName = "Emergency Fallback",
+                            source = "local",
+                            success = true,
+                            details = "Spatial gen failed; used full fallback."
+                        });
                     }
-                }
-
-                // ==============================================================
-                // STEP 4: Fallback if all attempts failed
-                // ==============================================================
-                if (acceptedConfig == null)
-                {
-                    SetStatus("Gemini failed — using local fallback generator...");
-                    var fallbackTimer = Stopwatch.StartNew();
-
-                    acceptedConfig = ProceduralRoomGenerator.GenerateFallback(result.difficulty);
-                    fallbackTimer.Stop();
-
-                    // C8 FIX: Validate the fallback config too
-                    var fallbackIssues = ProceduralRoomGenerator.Validate(acceptedConfig);
-                    bool fallbackValid = fallbackIssues.Count == 0 ||
-                                         fallbackIssues.TrueForAll(i => i.StartsWith("Warning"));
-
-                    steps.Add(new PipelineStep
-                    {
-                        stepName = "Fallback Generator",
-                        source = "local",
-                        success = fallbackValid,
-                        durationMs = fallbackTimer.ElapsedMilliseconds,
-                        details = fallbackValid
-                            ? $"Generated {acceptedConfig.rooms.Count} rooms locally after {attempt} Gemini failures."
-                            : $"Fallback generated but has issues: {string.Join("; ", fallbackIssues)}"
-                    });
-
-                    if (!fallbackValid)
-                    {
-                        Debug.LogWarning($"[Pipeline] Fallback has non-warning issues: {string.Join("; ", fallbackIssues)}");
-                    }
-
-                    result.generationSource = "fallback";
-                    Debug.Log("[Pipeline] Fallback generator produced a valid layout.");
                 }
                 else
                 {
-                    result.generationSource = "gemini";
+                    // ══════════════════════════════════════════════════════
+                    // AI_FULL MODE: Original LevelGen + QC retry loop
+                    // ══════════════════════════════════════════════════════
+                    string lastRejectionReason = null;
+
+                    while (attempt < maxQcRetries && acceptedConfig == null)
+                    {
+                        attempt++;
+                        SetStatus($"Generating level (attempt {attempt}/{maxQcRetries})...");
+
+                        // STEP 2: Level Gen Agent
+                        var genStep = await RunLevelGenStep(result.difficulty, lastRejectionReason, attempt);
+                        steps.Add(genStep);
+
+                        if (!genStep.success || !(genStep is LevelGenPipelineStep lgStep) || lgStep.config == null)
+                        {
+                            lastRejectionReason = "Level Gen Agent returned invalid config.";
+                            Debug.LogWarning($"[Pipeline] Level Gen attempt {attempt} failed: {lastRejectionReason}");
+                            continue;
+                        }
+
+                        // Auto-repair doorways before validation (compensates for
+                        // Flash model's weak spatial reasoning)
+                        int repairCount = ProceduralRoomGenerator.RepairDoorways(lgStep.config);
+
+                        // Auto-repair duplicate roles (e.g., 2 EXITs → demote extras to PACING)
+                        repairCount += RepairDuplicateRoles(lgStep.config);
+
+                        // Ensure spawnZones are initialized, then populate with enemies
+                        foreach (var room in lgStep.config.rooms)
+                        {
+                            if (room.spawnZones == null)
+                                room.spawnZones = new System.Collections.Generic.List<SpawnZoneConfig>();
+                        }
+                        ProceduralRoomGenerator.PopulateSpawnZones(lgStep.config, result.difficulty);
+
+                        if (repairCount > 0)
+                        {
+                            steps.Add(new PipelineStep
+                            {
+                                stepName = $"Auto-Repair (attempt {attempt})",
+                                source = "local",
+                                success = true,
+                                durationMs = 0,
+                                details = $"Repaired {repairCount} issue(s), populated spawn zones."
+                            });
+                        }
+
+                        // Local validation first (fast, free)
+                        var localIssues = ProceduralRoomGenerator.Validate(lgStep.config);
+                        // Filter: only hard errors cause rejection (warnings are acceptable)
+                        var hardErrors = localIssues.FindAll(i => !i.StartsWith("Warning"));
+                        if (hardErrors.Count > 0)
+                        {
+                            lastRejectionReason = $"Local validation: {string.Join("; ", hardErrors)}";
+                            steps.Add(new PipelineStep
+                            {
+                                stepName = $"Local Validation (attempt {attempt})",
+                                source = "local",
+                                success = false,
+                                durationMs = 0,
+                                details = lastRejectionReason
+                            });
+                            Debug.LogWarning($"[Pipeline] Local validation failed: {lastRejectionReason}");
+                            continue;
+                        }
+
+                        // STEP 3: QC Agent
+                        SetStatus($"QC validation (attempt {attempt})...");
+                        var qcStep = await RunQcStep(lgStep.config, attempt);
+                        steps.Add(qcStep);
+
+                        if (qcStep.success)
+                        {
+                            acceptedConfig = lgStep.config;
+                        }
+                        else
+                        {
+                            lastRejectionReason = qcStep.details;
+                            Debug.LogWarning($"[Pipeline] QC rejected attempt {attempt}: {lastRejectionReason}");
+                        }
+                    }
+
+                    // Fallback if all AI_Full attempts failed
+                    if (acceptedConfig == null)
+                    {
+                        SetStatus("Gemini failed — using local fallback generator...");
+                        var fallbackTimer = Stopwatch.StartNew();
+
+                        acceptedConfig = ProceduralRoomGenerator.GenerateFallback(result.difficulty);
+                        fallbackTimer.Stop();
+
+                        // C8 FIX: Validate the fallback config too
+                        var fallbackIssues = ProceduralRoomGenerator.Validate(acceptedConfig);
+                        bool fallbackValid = fallbackIssues.Count == 0 ||
+                                             fallbackIssues.TrueForAll(i => i.StartsWith("Warning"));
+
+                        steps.Add(new PipelineStep
+                        {
+                            stepName = "Fallback Generator",
+                            source = "local",
+                            success = fallbackValid,
+                            durationMs = fallbackTimer.ElapsedMilliseconds,
+                            details = fallbackValid
+                                ? $"Generated {acceptedConfig.rooms.Count} rooms locally after {attempt} Gemini failures."
+                                : $"Fallback generated but has issues: {string.Join("; ", fallbackIssues)}"
+                        });
+
+                        if (!fallbackValid)
+                        {
+                            Debug.LogWarning($"[Pipeline] Fallback has non-warning issues: {string.Join("; ", fallbackIssues)}");
+                        }
+
+                        result.generationSource = "fallback";
+                        Debug.Log("[Pipeline] Fallback generator produced a valid layout.");
+                    }
+                    else
+                    {
+                        result.generationSource = "gemini";
+                    }
                 }
 
                 result.config = acceptedConfig;
@@ -256,7 +338,7 @@ namespace Threshold.Generation
                 acceptedConfig.metadata.qcAttempts = attempt;
 
                 // ==============================================================
-                // STEP 5: Save to history for novelty comparison
+                // COMMON: Save to history for novelty comparison
                 // ==============================================================
                 if (historyManager != null)
                 {
@@ -274,7 +356,7 @@ namespace Threshold.Generation
                 }
 
                 // ==============================================================
-                // STEP 6: Build the physical floor
+                // COMMON: Build the physical floor
                 // ==============================================================
                 SetStatus("Building floor...");
                 var buildTimer = Stopwatch.StartNew();
@@ -387,7 +469,7 @@ namespace Threshold.Generation
                     systemPrompt: prompt,
                     gameStateJson: gameState,
                     model: GeminiModel.Pro,   // Pro (49B) for spatial reasoning
-                    timeoutSeconds: 60        // Allow up to 60s — quality > speed
+                    timeoutSeconds: 120       // Allow up to 120s — NVIDIA free tier can be slow
                 );
 
                 var response = await GeminiAgentBridge.Instance.SendAgentRequest(request);
@@ -495,6 +577,94 @@ namespace Threshold.Generation
             }
         }
 
+        private async Task<PipelineStep> RunPopulateStep(RoomGraphConfig config,
+            DifficultyProfile difficulty)
+        {
+            var timer = Stopwatch.StartNew();
+            try
+            {
+                string prompt = BuildPopulatePrompt(config, difficulty);
+
+                // Build a lightweight summary of the layout for the AI
+                var roomSummary = new System.Text.StringBuilder();
+                roomSummary.Append("{\"rooms\":[");
+                for (int i = 0; i < config.rooms.Count; i++)
+                {
+                    var r = config.rooms[i];
+                    if (i > 0) roomSummary.Append(",");
+                    roomSummary.Append($"{{\"roomId\":\"{r.roomId}\",\"shape\":{(int)r.shape}," +
+                        $"\"role\":{(int)r.role},\"doorwayCount\":{r.doorways?.Count ?? 0}," +
+                        $"\"gridCol\":{r.gridCol},\"gridRow\":{r.gridRow}}}");
+                }
+                roomSummary.Append("]}");
+
+                var request = new AgentRequest(
+                    agentName: "populate",
+                    systemPrompt: prompt,
+                    gameStateJson: roomSummary.ToString(),
+                    model: GeminiModel.Flash  // Flash for speed (~3s)
+                );
+
+                // Guard: if no API key or bridge not in scene, skip AI
+                if (GeminiAgentBridge.Instance == null)
+                {
+                    timer.Stop();
+                    return new PopulatePipelineStep
+                    {
+                        stepName = "AI Populate",
+                        source = "no_api",
+                        success = false,
+                        durationMs = timer.ElapsedMilliseconds,
+                        details = "GeminiAgentBridge not available. Will use local role assignment."
+                    };
+                }
+
+                var response = await GeminiAgentBridge.Instance.SendAgentRequest(request);
+                timer.Stop();
+
+                if (!response.success)
+                {
+                    return new PopulatePipelineStep
+                    {
+                        stepName = "AI Populate",
+                        source = "populate_failed",
+                        success = false,
+                        durationMs = timer.ElapsedMilliseconds,
+                        details = $"Populate agent failed: {response.error}. Will use local role assignment.",
+                        trace = response.trace
+                    };
+                }
+
+                // Parse role assignments from the response
+                var assignments = ParsePopulateResult(response.trace?.action);
+
+                return new PopulatePipelineStep
+                {
+                    stepName = "AI Populate",
+                    source = "gemini_populate",
+                    success = assignments != null && assignments.Count > 0,
+                    durationMs = timer.ElapsedMilliseconds,
+                    details = assignments != null
+                        ? $"AI assigned {assignments.Count} room roles."
+                        : "Failed to parse populate response. Will use local fallback.",
+                    trace = response.trace,
+                    assignments = assignments
+                };
+            }
+            catch (Exception ex)
+            {
+                timer.Stop();
+                return new PopulatePipelineStep
+                {
+                    stepName = "AI Populate",
+                    source = "error",
+                    success = false,
+                    durationMs = timer.ElapsedMilliseconds,
+                    details = $"Populate exception: {ex.Message}. Will use local fallback."
+                };
+            }
+        }
+
         // ====================================================================
         // Prompt Builders
         // ====================================================================
@@ -543,6 +713,39 @@ CHECKS (all must pass): 1)Exactly 1 ENTRY(role=0), 1 EXIT(role=1) 2)ENTRY/EXIT h
 
 OUTPUT: {""status"":""ACCEPTED"",""failures"":[],""validation_checks"":6,""passed"":6}
 or {""status"":""REJECTED"",""failures"":[""specific failure""],""validation_checks"":6,""passed"":N}";
+        }
+
+        private string BuildPopulatePrompt(RoomGraphConfig config, DifficultyProfile difficulty)
+        {
+            int interiorCount = 0;
+            foreach (var r in config.rooms)
+            {
+                if (r.role != RoomRole.ENTRY && r.role != RoomRole.EXIT)
+                    interiorCount++;
+            }
+
+            return $@"You are the POPULATION AGENT for THRESHOLD, a top-down roguelite corridor shooter.
+You receive a spatially valid room layout. Grid positions, doorways, and shapes are ALREADY SET and CORRECT.
+Your job: assign gameplay ROLES to the {interiorCount} interior rooms.
+
+ROOM ROLES (use INTEGER values): PACING=2, COMBAT=3, AMBUSH=4, BOSS=5, LOOT=6, CHOKE=7
+ROOM SHAPES: CROSSROADS=0(4 doors), T_JUNCTION=1(3 doors), STRAIGHT=2(2 doors opposite), CORNER=3(2 doors adjacent), DEAD_END=4(1 door)
+DO NOT change ENTRY(0) or EXIT(1) rooms.
+
+ASSIGNMENT RULES:
+1) Exactly 1 room must be BOSS(5) — prefer multi-door room near EXIT
+2) 1 PACING(2) room per 3 combat-type rooms — placed after intense sequences
+3) DEAD_END shapes → LOOT(6) candidate
+4) CORNER shapes → CHOKE(7) candidate
+5) If difficulty ≥ 1.2, include 1 AMBUSH(4) room
+6) Remaining rooms → COMBAT(3)
+
+DIFFICULTY: multiplier={difficulty.difficultyMultiplier:F1}, enemies_per_room={difficulty.baseEnemiesPerRoom}, elites={difficulty.eliteCount}, tactic={difficulty.preferredTactic}
+
+OUTPUT (strict JSON only):
+{{""role_assignments"":[{{""roomId"":""room_X"",""role"":3,""reason"":""short reason""}}]}}
+
+Assign a role to EVERY interior room. Output ONLY the JSON object.";
         }
 
         // ====================================================================
@@ -600,6 +803,131 @@ or {""status"":""REJECTED"",""failures"":[""specific failure""],""validation_che
 
             reason = "Could not parse QC verdict.";
             return false;
+        }
+
+        /// <summary>
+        /// Parses AI Populate agent output into a list of role assignments.
+        /// </summary>
+        private List<PopulateRoleAssignment> ParsePopulateResult(string actionJson)
+        {
+            if (string.IsNullOrWhiteSpace(actionJson)) return null;
+            try
+            {
+                string clean = StripCodeFences(actionJson);
+                var raw = JsonUtility.FromJson<PopulateOutputRaw>(clean);
+                if (raw?.role_assignments == null || raw.role_assignments.Length == 0)
+                    return null;
+
+                var result = new List<PopulateRoleAssignment>();
+                foreach (var a in raw.role_assignments)
+                {
+                    if (string.IsNullOrEmpty(a.roomId)) continue;
+                    // Validate role is in valid range
+                    if (a.role < 2 || a.role > 7) continue;
+                    result.Add(new PopulateRoleAssignment
+                    {
+                        roomId = a.roomId,
+                        role = (RoomRole)a.role
+                    });
+                }
+                return result.Count > 0 ? result : null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Pipeline] Failed to parse populate result: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Applies AI role assignments to the config with a local safety net.
+        /// If the AI fails, falls back to local AssignRoles.
+        /// Spawn zones and items are ALWAYS populated by local code.
+        /// </summary>
+        private void ApplyPopulateResult(RoomGraphConfig config, PipelineStep step,
+            DifficultyProfile difficulty)
+        {
+            bool aiApplied = false;
+
+            if (step.success && step is PopulatePipelineStep pStep && pStep.assignments != null)
+            {
+                // Apply AI role assignments
+                foreach (var assignment in pStep.assignments)
+                {
+                    var room = config.GetRoom(assignment.roomId);
+                    if (room != null && room.role != RoomRole.ENTRY && room.role != RoomRole.EXIT)
+                    {
+                        room.role = assignment.role;
+                    }
+                }
+
+                // Validate: ensure the layout meets minimum requirements
+                EnsureRequiredRoles(config, difficulty);
+                aiApplied = true;
+
+                if (logPipeline)
+                    Debug.Log($"[Pipeline] AI Populate applied {pStep.assignments.Count} role assignments.");
+            }
+
+            if (!aiApplied)
+            {
+                // Fallback: use local role assignment
+                ProceduralRoomGenerator.AssignRoles(config, difficulty);
+                if (logPipeline)
+                    Debug.Log("[Pipeline] Using local role assignment (AI Populate unavailable).");
+            }
+
+            // ALWAYS populate spawn zones and items locally (guaranteed correct)
+            ProceduralRoomGenerator.PopulateSpawnZones(config, difficulty);
+            ProceduralRoomGenerator.PopulateItems(config);
+        }
+
+        /// <summary>
+        /// Validates and fixes role assignment after AI Populate:
+        /// - Ensures exactly 1 BOSS room
+        /// - Ensures at least 1 COMBAT room
+        /// - Demotes duplicate BOSS rooms
+        /// </summary>
+        private static void EnsureRequiredRoles(RoomGraphConfig config, DifficultyProfile difficulty)
+        {
+            if (config?.rooms == null) return;
+
+            var interiorRooms = config.rooms.FindAll(r =>
+                r.role != RoomRole.ENTRY && r.role != RoomRole.EXIT);
+
+            // Ensure exactly 1 BOSS
+            var bossRooms = interiorRooms.FindAll(r => r.role == RoomRole.BOSS);
+            if (bossRooms.Count == 0 && interiorRooms.Count > 0)
+            {
+                // Promote the last multi-door room to BOSS
+                var candidate = interiorRooms.FindLast(r =>
+                    r.doorways != null && r.doorways.Count >= 2) ?? interiorRooms[^1];
+                candidate.role = RoomRole.BOSS;
+                Debug.Log($"[Pipeline] Promoted {candidate.roomId} to BOSS (none assigned by AI).");
+            }
+            else if (bossRooms.Count > 1)
+            {
+                // Keep only the first BOSS, demote others to COMBAT
+                for (int i = 1; i < bossRooms.Count; i++)
+                {
+                    bossRooms[i].role = RoomRole.COMBAT;
+                    Debug.Log($"[Pipeline] Demoted duplicate BOSS {bossRooms[i].roomId} to COMBAT.");
+                }
+            }
+
+            // Ensure at least 1 COMBAT room
+            var combatRooms = config.rooms.FindAll(r => r.role == RoomRole.COMBAT);
+            if (combatRooms.Count == 0 && interiorRooms.Count > 1)
+            {
+                // Find a non-BOSS, non-ENTRY, non-EXIT room to promote
+                var candidate = interiorRooms.Find(r =>
+                    r.role != RoomRole.BOSS && r.role != RoomRole.ENTRY && r.role != RoomRole.EXIT);
+                if (candidate != null)
+                {
+                    candidate.role = RoomRole.COMBAT;
+                    Debug.Log($"[Pipeline] Promoted {candidate.roomId} to COMBAT (none present).");
+                }
+            }
         }
 
         // ====================================================================
@@ -719,6 +1047,31 @@ or {""status"":""REJECTED"",""failures"":[""specific failure""],""validation_che
             public string[] failures;
             public int validation_checks;
             public int passed;
+        }
+
+        private class PopulatePipelineStep : PipelineStep
+        {
+            public List<PopulateRoleAssignment> assignments;
+        }
+
+        private class PopulateRoleAssignment
+        {
+            public string roomId;
+            public RoomRole role;
+        }
+
+        [Serializable]
+        private class PopulateOutputRaw
+        {
+            public PopulateOutputAssignment[] role_assignments;
+        }
+
+        [Serializable]
+        private class PopulateOutputAssignment
+        {
+            public string roomId;
+            public int role;
+            public string reason;
         }
     }
 }

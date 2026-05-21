@@ -73,11 +73,9 @@ namespace Threshold.Core
     /// </summary>
     public enum ItemType
     {
-        HEALTH_KIT,
-        AMMO_CACHE,
-        WEAPON_PICKUP,
-        SHIELD_BOOST,
-        TRAP
+        HEALTH_KIT,     // Full heal (medkit)
+        AMMO_CACHE,     // Ammo box
+        BANDAGE         // Partial heal
     }
 
     /// <summary>

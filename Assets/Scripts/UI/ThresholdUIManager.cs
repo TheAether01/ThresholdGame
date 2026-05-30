@@ -307,6 +307,14 @@ namespace Threshold.UI
         }
 
         /// <summary>
+        /// Updates the kills count and total enemies count on the HUD.
+        /// </summary>
+        public void SetKills(int current, int total)
+        {
+            hud?.SetKills(current, total);
+        }
+
+        /// <summary>
         /// Updates room progress on the HUD.
         /// </summary>
         public void UpdateRoomProgress(int current, int total)

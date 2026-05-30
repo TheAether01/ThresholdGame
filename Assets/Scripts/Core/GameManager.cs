@@ -514,6 +514,9 @@ namespace Threshold.Core
             _totalNPCCount = _allNPCs.Count;
             _killedNPCCount = 0;
 
+            // Initialize UI kills fraction display
+            UI.ThresholdUIManager.Instance?.SetKills(0, _totalNPCCount);
+
             Log($"Spawned {_totalNPCCount} NPCs across {_roomNPCs.Count} rooms.");
         }
 
@@ -530,6 +533,9 @@ namespace Threshold.Core
             if (deadCount != _killedNPCCount)
             {
                 _killedNPCCount = deadCount;
+
+                // Update HUD with fractional kills (e.g. 2 / 11)
+                UI.ThresholdUIManager.Instance?.SetKills(_killedNPCCount, _totalNPCCount);
 
                 // Update HUD with kill count
                 int alive = _totalNPCCount - _killedNPCCount;

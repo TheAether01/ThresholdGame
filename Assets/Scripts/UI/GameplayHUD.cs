@@ -90,6 +90,7 @@ namespace Threshold.UI
         private float _currentHealth = 1f;
         private int _currentAmmo;
         private int _kills;
+        private int _totalKillsTarget;
         private int _roomsCurrent;
         private int _roomsTotal;
 
@@ -392,10 +393,11 @@ namespace Threshold.UI
             RefreshKills();
         }
 
-        /// <summary>Set kill count directly.</summary>
-        public void SetKills(int count)
+        /// <summary>Set kill count and total targets.</summary>
+        public void SetKills(int current, int total)
         {
-            _kills = count;
+            _kills = current;
+            _totalKillsTarget = total;
             RefreshKills();
         }
 
@@ -486,7 +488,7 @@ namespace Threshold.UI
         private void RefreshKills()
         {
             if (_killText == null) return;
-            _killText.text = $"KILLS: {_kills}";
+            _killText.text = $"KILLS: {_kills} / {_totalKillsTarget}";
         }
 
         private void RefreshRoomProgress()

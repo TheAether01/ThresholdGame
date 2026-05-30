@@ -779,13 +779,22 @@ namespace Threshold.Core
             }
         }
 
-        // ====================================================================
-        // Background Music
-        // ====================================================================
+        private AudioSource GetActiveBgmSource()
+        {
+            if (BackgroundMusic.Instance != null && BackgroundMusic.Instance.AudioSource != null)
+            {
+                return BackgroundMusic.Instance.AudioSource;
+            }
+            return _bgmSource;
+        }
 
         private void FadeBGM(bool fadeIn)
         {
-            if (_bgmSource == null || backgroundMusic == null) return;
+            AudioSource activeSource = GetActiveBgmSource();
+            if (activeSource == null) return;
+
+            // If falling back to local GameManager source, require clip to be assigned
+            if (activeSource == _bgmSource && backgroundMusic == null) return;
 
             if (_bgmFadeCoroutine != null)
                 StopCoroutine(_bgmFadeCoroutine);
@@ -795,40 +804,46 @@ namespace Threshold.Core
 
         private IEnumerator FadeBGMCoroutine(bool fadeIn)
         {
+            AudioSource activeSource = GetActiveBgmSource();
+            if (activeSource == null) yield break;
+
             if (fadeIn)
             {
                 // Start playing if not already
-                if (!_bgmSource.isPlaying)
+                if (!activeSource.isPlaying)
                 {
-                    _bgmSource.clip = backgroundMusic;
-                    _bgmSource.volume = 0f;
-                    _bgmSource.Play();
+                    if (activeSource == _bgmSource)
+                    {
+                        activeSource.clip = backgroundMusic;
+                    }
+                    activeSource.volume = 0f;
+                    activeSource.Play();
                 }
 
                 // Fade in
                 float elapsed = 0f;
-                float startVol = _bgmSource.volume;
+                float startVol = activeSource.volume;
                 while (elapsed < musicFadeDuration)
                 {
                     elapsed += Time.unscaledDeltaTime;
-                    _bgmSource.volume = Mathf.Lerp(startVol, musicVolume, elapsed / musicFadeDuration);
+                    activeSource.volume = Mathf.Lerp(startVol, musicVolume, elapsed / musicFadeDuration);
                     yield return null;
                 }
-                _bgmSource.volume = musicVolume;
+                activeSource.volume = musicVolume;
             }
             else
             {
                 // Fade out
                 float elapsed = 0f;
-                float startVol = _bgmSource.volume;
+                float startVol = activeSource.volume;
                 while (elapsed < musicFadeDuration)
                 {
                     elapsed += Time.unscaledDeltaTime;
-                    _bgmSource.volume = Mathf.Lerp(startVol, 0f, elapsed / musicFadeDuration);
+                    activeSource.volume = Mathf.Lerp(startVol, 0f, elapsed / musicFadeDuration);
                     yield return null;
                 }
-                _bgmSource.volume = 0f;
-                _bgmSource.Stop();
+                activeSource.volume = 0f;
+                activeSource.Stop();
             }
 
             _bgmFadeCoroutine = null;

@@ -106,7 +106,11 @@ namespace Threshold.UI
 
             var esObj = new GameObject("EventSystem");
             esObj.AddComponent<UnityEngine.EventSystems.EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+            esObj.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+#else
             esObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+#endif
         }
 
         private void InitializeComponents()

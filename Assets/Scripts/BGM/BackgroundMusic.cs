@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class BackgroundMusic : MonoBehaviour
 {
-    private static BackgroundMusic instance;
+    public static BackgroundMusic Instance { get; private set; }
 
     [Header("Audio Settings")]
     [Tooltip("Drag your background music audio clip here.")]
@@ -13,17 +13,22 @@ public class BackgroundMusic : MonoBehaviour
 
     private AudioSource audioSource;
 
+    /// <summary>
+    /// Gets the programmatic AudioSource component.
+    /// </summary>
+    public AudioSource AudioSource => audioSource;
+
     void Awake()
     {
         // Singleton pattern: Prevents a second copy of music from spawning 
         // if you return to this scene later.
-        if (instance != null && instance != this)
+        if (Instance != null && Instance != this)
         {
             Destroy(gameObject);
             return;
         }
 
-        instance = this;
+        Instance = this;
         // Keeps the music playing seamlessly when you switch scenes
         DontDestroyOnLoad(gameObject);
 

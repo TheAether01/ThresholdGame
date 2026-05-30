@@ -697,7 +697,7 @@ namespace Threshold.NPC
                     var playerHealth = hitInfo.collider.GetComponentInParent<Threshold.Player.PlayerHealth>();
                     if (playerHealth != null)
                     {
-                        playerHealth.TakeDamage(scaledDamage);
+                        playerHealth.TakeDamage(scaledDamage, transform.position);
                     }
                 }
                 // else: shot hit a wall/obstacle — no damage, tracer stops at impact

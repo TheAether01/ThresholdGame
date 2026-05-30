@@ -1039,7 +1039,7 @@ GameObject:
   - component: {fileID: 877223123}
   - component: {fileID: 877223122}
   m_Layer: 0
-  m_Name: MoveStick
+  m_Name: VirtualJoystick
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1173,7 +1173,7 @@ GameObject:
   - component: {fileID: 914957301}
   - component: {fileID: 914957300}
   m_Layer: 0
-  m_Name: AimStick
+  m_Name: AimJoystick
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -3453,6 +3453,59 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2106826050
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2106826052}
+  - component: {fileID: 2106826051}
+  m_Layer: 0
+  m_Name: DamageIndicatorSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2106826051
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2106826050}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13d9d5ea790c62d4a8bd47980d59a539, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Threshold.UI.DamageIndicatorSystem
+  playerHeightOffset: 1.25
+  indicatorRadius: 220
+  indicatorLifetime: 1.2
+  arrowWidth: 50
+  arrowHeight: 70
+  rotationSmoothSpeed: 12
+  showGuideRing: 0
+  guideRingColor: {r: 1, g: 1, b: 1, a: 0.2}
+  guideRingThickness: 0.015
+--- !u!4 &2106826052
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2106826050}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2136954606
 GameObject:
   m_ObjectHideFlags: 0
@@ -3524,3 +3577,4 @@ SceneRoots:
   - {fileID: 1409855137}
   - {fileID: 1264410683}
   - {fileID: 1217085222}
+  - {fileID: 2106826052}

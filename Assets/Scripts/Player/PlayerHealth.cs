@@ -150,6 +150,13 @@ namespace Threshold.Player
                 var vignetteObj = new GameObject("DamageVignette");
                 vignetteObj.AddComponent<UI.DamageVignette>();
             }
+
+            // Ensure DamageIndicatorSystem exists
+            if (UI.DamageIndicatorSystem.Instance == null)
+            {
+                var indicatorObj = new GameObject("DamageIndicatorSystem");
+                indicatorObj.AddComponent<UI.DamageIndicatorSystem>();
+            }
         }
 
         private void Start()
@@ -187,6 +194,16 @@ namespace Threshold.Player
         /// </summary>
         public bool TakeDamage(float amount)
         {
+            return TakeDamage(amount, null);
+        }
+
+        /// <summary>
+        /// Apply damage to the player with attacker position for directional indicators.
+        /// Respects invincibility frames and spawn immunity.
+        /// Returns true if the player dies from this hit.
+        /// </summary>
+        public bool TakeDamage(float amount, Vector3? attackerPosition)
+        {
             if (IsDead || IsInvincible || amount <= 0f) return false;
 
             CurrentHealth = Mathf.Max(0f, CurrentHealth - amount);
@@ -223,6 +240,12 @@ namespace Threshold.Player
                     // Above threshold — ensure danger is off
                     vignette.SetDanger(0f);
                 }
+            }
+
+            // --- Feedback Layer 5: Directional damage indicator ---
+            if (attackerPosition.HasValue)
+            {
+                UI.DamageIndicatorSystem.Instance?.ShowIndicator(attackerPosition.Value);
             }
 
             // Update HUD

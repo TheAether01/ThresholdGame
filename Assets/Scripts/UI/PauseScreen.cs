@@ -141,15 +141,12 @@ namespace Threshold.UI
 
         private void HandleQuit()
         {
+            Time.timeScale = 1f; // Critical: Restore time scale before switching scenes
             OnQuit?.Invoke();
 
-            Debug.Log("[ThresholdUI] Quit requested.");
+            Debug.Log("[ThresholdUI] Quit to Main Menu requested.");
 
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.isPlaying = false;
-#else
-            Application.Quit();
-#endif
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
         }
 
         // ====================================================================
@@ -201,7 +198,7 @@ namespace Threshold.UI
 
 
 
-            _quitButton = CreateButton("Btn_Quit", rootObj.transform, "✕  QUIT",
+            _quitButton = CreateButton("Btn_Quit", rootObj.transform, "✕  MAIN MENU",
                 new Color(0.85f, 0.2f, 0.2f, 1f), new Color(0.65f, 0.15f, 0.15f, 1f),
                 btnWidth, btnHeight, 0.5f, startY - 0.08f);
         }
